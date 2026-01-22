@@ -32,7 +32,7 @@ jobs:
         SERVER_CHAN_KEY: ${{ secrets.SERVER_CHAN_KEY }}
         # 可选：如果需要AI分析，添加以下密钥
         # AI_API_KEY: ${{ secrets.AI_API_KEY }}
-          ZHIPU_API_KEY: ${{ secrets.ZHIPU_API_KEY }}
+        ZHIPU_API_KEY: ${{ secrets.ZHIPU_API_KEY }}
       run: python tech_news_ai.py
     
     - name: Upload analysis result
