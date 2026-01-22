@@ -18,8 +18,10 @@ import hashlib
 class AITechNewsAnalyzer:
     def __init__(self):
         self.server_chan_key = os.getenv('SERVER_CHAN_KEY')
-        self.ai_api_key = os.getenv('AI_API_KEY')  # 用于内容分析的AI API密钥
+        self.zhipu_api_key = os.getenv('ZHIPU_API_KEY')  # 新增智谱API密钥
         self.twenty_four_hours_ago = datetime.now() - timedelta(hours=24)
+        # ... 其余保持不变
+
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
@@ -83,6 +85,7 @@ class AITechNewsAnalyzer:
         self.ai_articles = []
         self.deep_analysis = []
         self.featured_article = None
+
     
     def fetch_arxiv_papers(self, source):
         """抓取Arxiv AI最新论文"""
@@ -196,22 +199,18 @@ class AITechNewsAnalyzer:
         except Exception as e:
             print(f"Hacker News抓取失败: {e}")
     
-    def analyze_with_ai(self, article):
-        """使用AI分析单篇文章（使用免费API）"""
-        try:
-            # 方法1: 使用OpenRouter的免费模型（需要注册获取API key）
-            if self.ai_api_key:
-                return self._analyze_with_openai(article)
-            # 方法2: 使用智谱AI（有免费额度）
-            elif os.getenv('ZHIPU_API_KEY'):
-                return self._analyze_with_zhipu(article)
-            # 方法3: 使用本地关键词分析（无需API）
-            else:
-                return self._analyze_with_keywords(article)
-                
-        except Exception as e:
-            print(f"AI分析失败: {e}")
+def analyze_with_ai(self, article):
+    """使用智谱AI分析文章内容"""
+    try:
+        # 优先使用智谱AI
+        if self.zhipu_api_key:
+            return self._analyze_with_zhipu(article)
+        # 备用：关键词分析
+        else:
             return self._analyze_with_keywords(article)
+    except Exception as e:
+        print(f"AI分析失败: {e}")
+        return self._analyze_with_keywords(article)
     
     def _analyze_with_keywords(self, article):
         """基于关键词的简单分析"""
@@ -257,7 +256,95 @@ class AITechNewsAnalyzer:
             analysis['importance'] = 7
         
         return analysis
-    
+    def _analyze_with_zhipu(self, article):
+    """使用智谱AI GLM模型进行分析"""
+    try:
+        from zhipuai import ZhipuAI
+        
+        # 初始化智谱客户端
+        client = ZhipuAI(api_key=self.zhipu_api_key)
+        
+        # 构建分析提示词
+        prompt = f"""
+        你是一个AI科技分析师。请分析以下科技文章，提供结构化分析。
+        
+        文章标题：{article['title']}
+        文章来源：{article['source']}
+        文章摘要：{article.get('summary', '暂无详细摘要')}
+        
+        请提供以下分析：
+        1. 核心技术点（识别文中提到的关键技术，如Transformer、LLM、多模态等）
+        2. 创新程度（高/中/低）
+        3. 行业影响（科研突破、商业应用、技术普及等）
+        4. 推荐理由（为什么这篇文章值得关注）
+        5. 技术标签（3-5个关键词）
+        
+        请用JSON格式回复，包含以下字段：
+        - technique_points: 列表，核心技术点
+        - innovation_level: 字符串，高/中/低
+        - industry_impact: 字符串
+        - recommendation_reason: 字符串
+        - tech_tags: 列表，技术标签
+        - summary: 字符串，一句话总结
+        
+        注意：保持分析客观专业，如果信息不足请合理推断。
+        """
+        
+        # 调用智谱GLM模型
+        response = client.chat.completions.create(
+            model="glm-4",  # 使用GLM-4模型，也可用"glm-3-turbo"
+            messages=[
+                {"role": "system", "content": "你是一个专业的AI科技分析师，擅长分析技术文章。"},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.3,
+            max_tokens=800
+        )
+        
+        # 解析返回内容
+        result_text = response.choices[0].message.content
+        
+        # 提取JSON部分（智谱可能会在JSON外添加说明文字）
+        import re
+        json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
+        if json_match:
+            import json
+            analysis_result = json.loads(json_match.group())
+        else:
+            # 如果返回的不是纯JSON，使用默认结构
+            analysis_result = {
+                "technique_points": ["AI技术"],
+                "innovation_level": "中",
+                "industry_impact": "推动AI技术发展",
+                "recommendation_reason": "文章涉及当前AI热点话题",
+                "tech_tags": ["人工智能"],
+                "summary": f"{article['title']} - AI领域相关进展"
+            }
+        
+        # 转换为脚本需要的格式
+        return {
+            'technique_tags': analysis_result.get('tech_tags', ['AI技术']),
+            'trend_insight': analysis_result.get('industry_impact', '技术进展'),
+            'business_impact': analysis_result.get('recommendation_reason', '行业关注'),
+            'difficulty': self._map_innovation_to_difficulty(analysis_result.get('innovation_level', '中')),
+            'ai_summary': analysis_result.get('summary', ''),
+            'innovation_level': analysis_result.get('innovation_level', '中'),
+            'source': 'zhipu_ai'
+        }
+        
+    except Exception as e:
+        print(f"智谱AI分析失败: {e}")
+        # 降级到关键词分析
+        return self._analyze_with_keywords(article)
+
+def _map_innovation_to_difficulty(self, level):
+    """将创新程度映射为技术难度"""
+    mapping = {
+        '高': 'high',
+        '中': 'medium', 
+        '低': 'low'
+    }
+    return mapping.get(level, 'medium')
     def _analyze_with_openai(self, article):
         """使用OpenAI兼容API进行分析（需要API密钥）"""
         try:
@@ -382,10 +469,31 @@ class AITechNewsAnalyzer:
         
         message = f"""# 🤖 AI科技日报 ({current_time})
 
-## 📊 数据概览
-• 总共抓取: **{len(self.all_articles)}** 篇文章
-• AI相关: **{len(self.ai_articles)}** 篇
-• 分析深度: **{len(self.deep_analysis)}** 篇详细分析
+# 在深度分析部分，更新分析文本生成
+analysis_text = f"""
+## 📊 {article['title']}
+
+**来源**: {article['source']} | **时间**: {article.get('time', 'N/A')}
+**AI分析模型**: 🤖 智谱GLM-4
+
+**🔗 原文链接**: {article['link']}
+
+**📝 内容摘要**:
+{article.get('summary', '暂无详细摘要')}
+
+**🏷️ 技术标签**: {', '.join(analysis.get('technique_tags', ['AI技术']))}
+
+**✨ 创新程度**: {analysis.get('innovation_level', '中').upper()}
+
+**📈 趋势洞察**: {analysis.get('trend_insight', 'AI领域进展')}
+
+**💼 行业影响**: {analysis.get('business_impact', '推动AI技术发展与应用')}
+
+**⚙️ 技术难度**: {analysis.get('difficulty', 'medium').upper()}
+
+**🤖 AI分析摘要**: {analysis.get('ai_summary', '')}
+
+---
 """
 
         # 1. AI快讯摘要
