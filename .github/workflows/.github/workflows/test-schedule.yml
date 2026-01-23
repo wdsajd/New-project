@@ -1,0 +1,13 @@
+name: Test Schedule
+
+on:
+  schedule:
+    # 设置为未来5-10分钟，方便快速验证
+    - cron: ‘*/10 * * * *’  # 每10分钟一次
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo “🕐 测试定时任务于 $(date) 成功触发”
