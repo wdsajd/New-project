@@ -1,0 +1,10 @@
+name: Hello Schedule
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '10 21 * * *'
+jobs:
+  hello:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Hello World at $(date)"
