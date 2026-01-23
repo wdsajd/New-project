@@ -1,8 +1,8 @@
 name: Final Schedule Test
-
+# 格式A：明确设置为空映射（推荐，最清晰）
 on:
   schedule:
-    - cron: '54 20 * * *'  # 设置为今天的 UTC 时间 14:30 (请根据当前UTC时间调整，确保是未来时间)
+    - cron: '55 20 * * *'
   workflow_dispatch: {}
 
 jobs:
