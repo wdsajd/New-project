@@ -1,0 +1,13 @@
+name: Final Schedule Test
+
+on:
+  schedule:
+    - cron: '30 14 * * *'  # 设置为今天的 UTC 时间 14:30 (请根据当前UTC时间调整，确保是未来时间)
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark Success
+        run: echo "🟢 SUCCESS: Schedule triggered at $(date)"
