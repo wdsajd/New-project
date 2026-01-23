@@ -22,7 +22,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        pip install requests beautifulsoup4 feedparser lxml zhipuai
     
     - name: Run AI News Analyzer
       env:
@@ -30,12 +30,10 @@ jobs:
         ZHIPU_API_KEY: ${{ secrets.ZHIPU_API_KEY }}
       run: python tech_news_ai.py
     
-    - name: Upload analysis result (Optional)
+    - name: Upload analysis result
       if: always()
       uses: actions/upload-artifact@v4
       with:
         name: ai-news-analysis
-        path: |
-          ai_news_analysis.json
-          news_report.md
+        path: ai_news_analysis.json
         retention-days: 5
