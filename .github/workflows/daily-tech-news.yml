@@ -4,6 +4,7 @@ on:
   schedule:
     # 每天UTC时间0点运行（即北京时间早上8点）
     - cron: '0 9 * * *'
+    workflow_dispatch: Ture
 
 jobs:
   analyze-and-send:
