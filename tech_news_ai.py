@@ -131,7 +131,7 @@ class AITechNewsAnalyzer:
                         self.all_articles.append(article)
                         self.ai_articles.append(article)
         except Exception as e:
-            print(f"⚠️ Arxiv抓取失败: {e}")
+            print(f"⚠️ Arxiv论文抓取失败: {e}")
     
     def fetch_rss(self, source):
         """抓取RSS源"""
@@ -155,7 +155,8 @@ class AITechNewsAnalyzer:
                 
                 ai_keywords = ['ai', 'artificial intelligence', 'machine learning', 
                               'deep learning', 'neural network', 'llm', 'gpt', 'transformer',
-                              '人工智能', '机器学习', '深度学习', '大模型']
+                              '人工智能', '机器学习', '深度学习', '大模型','生成式AI','计算机视觉','图像生成','训练'，
+                              'AIGC','Diffusion模型','MoE模型','RLHF']
                 
                 is_ai_related = any(keyword in content for keyword in ai_keywords)
                 
@@ -176,7 +177,7 @@ class AITechNewsAnalyzer:
                     self.ai_articles.append(article)
                     
         except Exception as e:
-            print(f"⚠️ RSS抓取失败 {source['name']}: {e}")
+            print(f"⚠️ RSS网站抓取失败 {source['name']}: {e}")
     
     def fetch_hackernews(self, source):
         """抓取Hacker News AI内容"""
@@ -243,17 +244,19 @@ class AITechNewsAnalyzer:
 摘要：{article.get('summary', '暂无详细摘要')}
 
 请提供以下分析：
-1. 核心技术点（识别文中提到的关键技术）
+1. 核心技术点（识别文中提到的关键技术并进行简要说明）
 2. 创新程度（高/中/低）
-3. 行业影响（科研突破、商业应用、技术普及等）
+3. 行业影响（技术迭代方向、拓展潜力、科研突破、商业应用、技术普及等）
 4. 推荐理由（为什么这篇文章值得关注）
-5. 技术标签（3-5个关键词）
+5.性能表现（推理速度、准确率、多模态兼容性、上下文承载能力等）
+6. 技术标签（3-5个关键词）
 
 请用JSON格式回复，包含以下字段：
 - technique_points: 列表，核心技术点
 - innovation_level: 字符串，高/中/低
 - industry_impact: 字符串
 - recommendation_reason: 字符串
+- efficiency_performance: 字符串
 - tech_tags: 列表，技术标签
 """
             
