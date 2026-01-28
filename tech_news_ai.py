@@ -155,7 +155,7 @@ class AITechNewsAnalyzer:
                 
                 ai_keywords = ['ai', 'artificial intelligence', 'machine learning', 
                               'deep learning', 'neural network', 'llm', 'gpt', 'transformer',
-                              '人工智能', '机器学习', '深度学习', '大模型', '生成式AI', '计算机视觉', '图像生成', '训练'，
+                              '人工智能', '机器学习', '深度学习', '大模型', '生成式AI', '计算机视觉', '图像生成','训练',
                               'AIGC', 'Diffusion模型', 'MoE模型', 'RLHF']
                 
                 is_ai_related = any(keyword in content for keyword in ai_keywords)
