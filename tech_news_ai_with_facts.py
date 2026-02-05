@@ -293,14 +293,13 @@ class EnhancedNewsAnalyzer:
             return None
     
     # ==================== 新增：抓取事实新闻 ====================
-        def fetch_fact_news(self):
+    def fetch_fact_news(self):
         """抓取多方面事实新闻"""
         print("\n📰 开始抓取多方面事实新闻（过去48小时）...")
         
         for source in self.fact_news_sources:
             print(f"  → {source['name']}")
             try:
-                article['priority'] = source.get('priority', 5)  # 新增：在抓取时加入 priority 到 article
                 if source['type'] == 'rss':
                     self.fetch_rss(source, article_type='fact')
                 elif source['type'] == 'hn_api':
@@ -312,23 +311,24 @@ class EnhancedNewsAnalyzer:
         
         print(f"✅ 事实新闻抓取完成！共获得 {len(self.fact_articles)} 篇")
         
-        # 去重和筛选最重要的12篇（按 priority + importance + time 排序）
+        # 去重
         unique_facts = []
         seen_ids = set()
         for article in self.fact_articles:
             if article['id'] not in seen_ids:
                 unique_facts.append(article)
                 seen_ids.add(article['id'])
-
+        
+        # 排序：优先级高 → 重要性高 → 时间新
         self.fact_articles = sorted(
             unique_facts,
             key=lambda x: (
-                -x.get('priority', 5),  # 高优先级
+                -x.get('priority', 5),                     # 注意负号：越高优先级越靠前
                 x.get('importance', 5),
                 datetime.strptime(x['time'], '%Y-%m-%d %H:%M') if x.get('time') else datetime.now()
             ),
             reverse=True
-        )[:12]  # 最多12条
+        )[:12]  # 最多保留12条
     
     # ==================== 原有AI分析功能（保持不变） ====================
     def fetch_all_news(self):
