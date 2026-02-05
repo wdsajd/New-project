@@ -16,55 +16,39 @@ import feedparser
 from urllib.parse import urljoin
 from collections import Counter
 
-
 class EnhancedNewsAnalyzer:
     def __init__(self):
         self.server_chan_key = os.getenv('SERVER_CHAN_KEY')
         self.zhipu_api_key = os.getenv('ZHIPU_API_KEY')
         self.forty_eight_hours_ago = datetime.now() - timedelta(hours=48)
-
+        
+        # AI科技新闻源（保持不变）
         self.ai_news_sources = [
-            {'name': 'Arxiv AI Papers', 'url': 'http://arxiv.org/list/cs.AI/recent', 'type': 'arxiv',
-             'category': 'ai_research'},
-            {'name': 'TechCrunch AI', 'url': 'https://techcrunch.com/category/artificial-intelligence/feed/',
-             'type': 'rss', 'category': 'tech'},
-            {'name': 'Hacker News AI',
-             'url': 'https://hn.algolia.com/api/v1/search_by_date?tags=story&numericFilters=created_at_i>{}&query=AI',
-             'type': 'hn_api', 'category': 'community'},
+            {'name': 'Arxiv AI Papers', 'url': 'http://arxiv.org/list/cs.AI/recent', 'type': 'arxiv', 'category': 'ai_research'},
+            {'name': 'TechCrunch AI', 'url': 'https://techcrunch.com/category/artificial-intelligence/feed/', 'type': 'rss', 'category': 'tech'},
+            {'name': 'Hacker News AI', 'url': 'https://hn.algolia.com/api/v1/search_by_date?tags=story&numericFilters=created_at_i>{}&query=AI', 'type': 'hn_api', 'category': 'community'},
             {'name': '机器之心', 'url': 'https://www.jiqizhixin.com/feed', 'type': 'rss', 'category': 'cn_ai'},
             {'name': '量子位', 'url': 'https://www.qbitai.com/feed', 'type': 'rss', 'category': 'cn_ai'},
         ]
-
+        
         # 更新：多方面事实新闻源，优先中国国内可访问来源，减少重复和过时
         self.fact_news_sources = [
             # 国内新闻（优先可访问来源）
-            {'name': '央视网', 'url': 'http://news.cctv.com/rss/index.xml', 'type': 'rss', 'category': 'china',
-             'lang': 'zh'},
-            {'name': '新华网', 'url': 'http://www.news.cn/rss/rsstw.xml', 'type': 'rss', 'category': 'china',
-             'lang': 'zh'},  # 更新为更稳定的新华网RSS
-            {'name': '人民日报', 'url': 'http://www.people.com.cn/rss/politics.xml', 'type': 'rss', 'category': 'china',
-             'lang': 'zh'},
-            {'name': '澎湃新闻', 'url': 'https://rsshub.app/thepaper/featured', 'type': 'rss', 'category': 'china',
-             'lang': 'zh'},
-            {'name': '虎扑社区', 'url': 'https://rsshub.app/hupu/bbs/all', 'type': 'rss', 'category': 'community',
-             'lang': 'zh'},  # 添加虎扑 via RSSHub
-            {'name': '腾讯新闻', 'url': 'https://rsshub.app/tencent/news/author/1', 'type': 'rss', 'category': 'china',
-             'lang': 'zh'},  # 添加腾讯新闻
+            {'name': '央视网', 'url': 'http://news.cctv.com/rss/index.xml', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
+            {'name': '新华网', 'url': 'http://www.news.cn/rss/rsstw.xml', 'type': 'rss', 'category': 'china', 'lang': 'zh'},  # 更新为更稳定的新华网RSS
+            {'name': '人民日报', 'url': 'http://www.people.com.cn/rss/politics.xml', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
+            {'name': '澎湃新闻', 'url': 'https://rsshub.app/thepaper/featured', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
+            {'name': '虎扑社区', 'url': 'https://rsshub.app/hupu/bbs/all', 'type': 'rss', 'category': 'community', 'lang': 'zh'},  # 添加虎扑 via RSSHub
+            {'name': '腾讯新闻', 'url': 'https://rsshub.app/tencent/news/author/1', 'type': 'rss', 'category': 'china', 'lang': 'zh'},  # 添加腾讯新闻
             # 国际/亚太新闻（选择在中国可访问或中立来源）
-            {'name': '联合早报', 'url': 'https://www.zaobao.com/realtime/china/rss', 'type': 'rss', 'category': 'asia',
-             'lang': 'zh'},  # 更新为中国实时
-            {'name': 'BBC中文', 'url': 'https://feeds.bbci.co.uk/zhongwen/simp/rss.xml', 'type': 'rss',
-             'category': 'world', 'lang': 'zh'},  # BBC中文版，可访问
-            {'name': 'Reuters China', 'url': 'https://www.reuters.com/arc/outboundfeeds/rss/world/china/',
-             'type': 'rss', 'category': 'world', 'lang': 'en'},  # Reuters中国相关
+            {'name': '联合早报', 'url': 'https://www.zaobao.com/realtime/china/rss', 'type': 'rss', 'category': 'asia', 'lang': 'zh'},  # 更新为中国实时
+            {'name': 'BBC中文', 'url': 'https://feeds.bbci.co.uk/zhongwen/simp/rss.xml', 'type': 'rss', 'category': 'world', 'lang': 'zh'},  # BBC中文版，可访问
+            {'name': 'Reuters China', 'url': 'https://www.reuters.com/arc/outboundfeeds/rss/world/china/', 'type': 'rss', 'category': 'world', 'lang': 'en'},  # Reuters中国相关
             # 社区/综合
-            {'name': 'Reddit World News', 'url': 'https://www.reddit.com/r/worldnews/.rss', 'type': 'rss',
-             'category': 'world', 'lang': 'en'},
-            {'name': 'Hacker News Top',
-             'url': 'https://hn.algolia.com/api/v1/search_by_date?tags=story&numericFilters=created_at_i>{}',
-             'type': 'hn_api', 'category': 'tech', 'lang': 'en'},
+            {'name': 'Reddit World News', 'url': 'https://www.reddit.com/r/worldnews/.rss', 'type': 'rss', 'category': 'world', 'lang': 'en'},
+            {'name': 'Hacker News Top', 'url': 'https://hn.algolia.com/api/v1/search_by_date?tags=story&numericFilters=created_at_i>{}', 'type': 'hn_api', 'category': 'tech', 'lang': 'en'},
         ]
-
+        
         self.all_articles = []
         self.ai_articles = []
         self.fact_articles = []
@@ -74,7 +58,7 @@ class EnhancedNewsAnalyzer:
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
-
+    
     # ==================== 原有AI新闻抓取方法（保持不变） ====================
     def fetch_arxiv(self, source):
         """抓取Arxiv AI论文"""
@@ -84,22 +68,22 @@ class EnhancedNewsAnalyzer:
                 soup = BeautifulSoup(response.text, 'html.parser')
                 dt_list = soup.find_all('dt')
                 dd_list = soup.find_all('dd')
-
+                
                 for i, (dt, dd) in enumerate(zip(dt_list[:8], dd_list[:8])):
                     paper_id_elem = dt.find('a', title='Abstract')
                     if not paper_id_elem:
                         continue
-
+                    
                     paper_id = paper_id_elem.text.strip()
                     title_elem = dd.find('div', class_='list-title')
                     authors_elem = dd.find('div', class_='list-authors')
                     abstract_elem = dd.find('p')
-
+                    
                     if title_elem:
                         title = title_elem.text.replace('Title:', '').strip()
                         authors = authors_elem.text.replace('Authors:', '').strip() if authors_elem else ''
                         abstract = abstract_elem.text.strip() if abstract_elem else ''
-
+                        
                         article = {
                             'id': f"arxiv_{paper_id}",
                             'title': f"[论文] {title[:120]}",
@@ -116,49 +100,49 @@ class EnhancedNewsAnalyzer:
                         self.ai_articles.append(article)
         except Exception as e:
             print(f"⚠️ Arxiv抓取失败: {e}")
-
+    
     def fetch_rss(self, source, article_type='ai'):
         """通用RSS抓取方法，增强去重和时效性"""
         try:
             feed = feedparser.parse(source['url'])
             articles_added = 0
             seen_links = set()  # 增强去重
-
+            
             for entry in feed.entries[:20]:  # 增加检查范围以获取更多新鲜内容
                 if articles_added >= 5:  # 每个源最多取5条
                     break
-
+                    
                 # 检查发布时间
                 pub_time = None
                 if hasattr(entry, 'published_parsed'):
                     pub_time = datetime(*entry.published_parsed[:6])
                 elif hasattr(entry, 'updated_parsed'):
                     pub_time = datetime(*entry.updated_parsed[:6])
-
+                
                 # 如果无法获取时间，使用当前时间但降低优先级
                 if not pub_time:
                     pub_time = datetime.now()
                     article_importance = 4  # 降低未知时间的重要性
-
+                
                 # 检查是否在过去48小时内
                 if pub_time < self.forty_eight_hours_ago:
                     continue
-
+                
                 title = entry.get('title', '').strip()
                 summary = entry.get('summary', '').strip()
                 link = entry.get('link', '').strip()
-
+                
                 # 去重检查
                 link_hash = hashlib.md5(link.encode()).hexdigest()
                 if link_hash in seen_links:
                     continue
                 seen_links.add(link_hash)
-
+                
                 # 清理HTML标签
                 if summary:
                     soup = BeautifulSoup(summary, 'html.parser')
                     summary = soup.get_text()[:250]
-
+                
                 article = {
                     'id': link_hash[:8],
                     'title': title[:150],
@@ -171,23 +155,22 @@ class EnhancedNewsAnalyzer:
                     'time': pub_time.strftime('%Y-%m-%d %H:%M'),
                     'type': article_type
                 }
-
+                
                 # 如果是英文，进行翻译以提供中英文对照
                 if article['lang'] == 'en' and self.zhipu_api_key:
                     translated = self.translate_with_zhipu(title, summary)
                     if translated:
                         article['title_translated'] = translated['title']
-                        article['summary_translated'] = translated['summary'][:180] + '...' if len(translated['summary']) > 180 else translated['summary']
-
+                        article['summary_translated'] = translated['summary']
+                
                 # 如果是AI新闻源，检查是否AI相关
                 if article_type == 'ai':
                     content = f"{title} {summary}".lower()
-                    ai_keywords = ['ai', 'artificial intelligence', 'machine learning',
-                                   'deep learning', 'neural network', 'llm', 'gpt', 'transformer',
-                                   '人工智能', '机器学习', '深度学习', '大模型', '生成式AI', '计算机视觉', '图像生成',
-                                   '训练',
-                                   'AIGC', 'Diffusion模型', 'MoE模型', 'RLHF']
-
+                    ai_keywords = ['ai', 'artificial intelligence', 'machine learning', 
+                              'deep learning', 'neural network', 'llm', 'gpt', 'transformer',
+                              '人工智能', '机器学习', '深度学习', '大模型', '生成式AI', '计算机视觉', '图像生成','训练',
+                              'AIGC', 'Diffusion模型', 'MoE模型', 'RLHF']
+                    
                     is_ai_related = any(keyword in content for keyword in ai_keywords)
                     if is_ai_related:
                         article['importance'] = 8
@@ -200,23 +183,23 @@ class EnhancedNewsAnalyzer:
                         self.all_articles.append(article)
                         self.fact_articles.append(article)
                         articles_added += 1
-
+                    
         except Exception as e:
             print(f"⚠️ RSS抓取失败 {source['name']}: {e}")
-
+    
     def fetch_hackernews(self, source, article_type='ai'):
         """通用Hacker News抓取方法"""
         try:
             timestamp = int(self.forty_eight_hours_ago.timestamp())
             query_param = source['url'].format(timestamp)
             url = query_param
-
+            
             # 如果不是AI专用搜索，移除AI查询参数
             if article_type == 'fact' and 'query=AI' in url:
                 url = url.replace('&query=AI', '')
-
+            
             response = requests.get(url, timeout=10)
-
+            
             if response.status_code == 200:
                 hits = response.json().get('hits', [])
                 seen_links = set()
@@ -226,14 +209,13 @@ class EnhancedNewsAnalyzer:
                     if link_hash in seen_links:
                         continue
                     seen_links.add(link_hash)
-
+                    
                     title = hit.get('title', '')
-
+                    
                     # 对于事实新闻，不筛选AI内容
-                    if article_type == 'ai' and not any(
-                            keyword in title.lower() for keyword in ['ai', 'llm', 'gpt', 'openai', 'anthropic']):
+                    if article_type == 'ai' and not any(keyword in title.lower() for keyword in ['ai', 'llm', 'gpt', 'openai', 'anthropic']):
                         continue
-
+                    
                     article = {
                         'id': f"hn_{hit.get('objectID', '')}",
                         'title': title,
@@ -246,51 +228,48 @@ class EnhancedNewsAnalyzer:
                         'time': datetime.fromtimestamp(hit.get('created_at_i', 0)).strftime('%Y-%m-%d %H:%M'),
                         'type': article_type
                     }
-
+                    
                     # 翻译如果英文
                     if source.get('lang') == 'en' and self.zhipu_api_key:
                         translated = self.translate_with_zhipu(title, '')
                         if translated:
                             article['title_translated'] = translated['title']
-
+                    
                     self.all_articles.append(article)
                     if article_type == 'ai':
                         self.ai_articles.append(article)
                     else:
                         self.fact_articles.append(article)
-
+                        
         except Exception as e:
             print(f"⚠️ Hacker News抓取失败: {e}")
-
+    
     # ==================== 新增：翻译功能 ====================
     def translate_with_zhipu(self, title, summary):
         """使用智谱AI翻译英文到中文，提供贴合实际的翻译"""
         try:
             from zhipuai import ZhipuAI
-
+            
             client = ZhipuAI(api_key=self.zhipu_api_key)
+            
+            prompt = f"""作为专业翻译，请将以下英文内容翻译成贴合实际、自然流畅的中文：
+标题：{title}
+摘要：{summary}
 
-            prompt = f"""你是一位经验丰富的中文新闻编辑和专业英中翻译专家。请将以下英文新闻/论文标题和摘要翻译成非常自然、流畅、符合当下中文互联网和科技媒体阅读习惯的中文。
+请提供中英文对照：
+- 原标题：[original title]
+- 翻译标题：[translated title]
+- 原摘要：[original summary]
+- 翻译摘要：[translated summary]
 
-            要求：
-            1. 标题要简洁、有吸引力、信息量足，像《量子位》《机器之心》《36氪》《极客公园》等中文科技媒体常用的标题风格,可以选用「震惊体」轻度版、「XX炸了」「又双叒叕」「重磅」「彻底爆了」「被玩坏了」等，但不要低俗
-            2. 避免生硬的直译和“翻译腔”（如“XX宣布”“XX表示”过度使用），也可以选用年轻人、科技圈常用的表达（「卷疯了」「炸场」「拉满」「吊打」「天花板」「真香」「不讲武德」等在合适时可用，但保持专业底线）
-            3. 摘要先抛最炸裂的点，再补充背景和细节，像短视频文案一样吸引人继续看
-            4. 用词现代、接地气，但保持专业性（尤其是AI、科技领域术语要规范）
-            5. 如果原文有专有名词（如公司名、产品名、模型名），尽量保留英文原名或使用最常见的中文叫法
-
-            原文：
-            标题：{title}
-            摘要：{summary if summary else "（无摘要）"}
-
-            请直接返回 JSON 格式，不要包含任何多余说明：
-
-            {{
-              "title": "最自然的中文标题",
-              "summary": "最自然的中文摘要（控制在150-200字左右，如果原文很短可适当缩短）"
-            }}
-            """
-
+输出JSON格式：
+{{
+  "title": "translated title",
+  "summary": "translated summary"
+}}
+但在报告中可显示完整对照。
+"""
+            
             response = client.chat.completions.create(
                 model="glm-3-turbo",
                 messages=[
@@ -300,24 +279,24 @@ class EnhancedNewsAnalyzer:
                 temperature=0.2,
                 max_tokens=400
             )
-
+            
             result_text = response.choices[0].message.content
             json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
-
+            
             if json_match:
                 return json.loads(json_match.group())
             else:
                 return None
-
+            
         except Exception as e:
             print(f"⚠️ 翻译失败: {e}")
             return None
-
+    
     # ==================== 新增：抓取事实新闻 ====================
     def fetch_fact_news(self):
         """抓取多方面事实新闻"""
         print("\n📰 开始抓取多方面事实新闻（过去48小时）...")
-
+        
         for source in self.fact_news_sources:
             print(f"  → {source['name']}")
             try:
@@ -329,9 +308,9 @@ class EnhancedNewsAnalyzer:
             except Exception as e:
                 print(f"    ❌ 抓取失败: {e}")
                 continue
-
+        
         print(f"✅ 事实新闻抓取完成！共获得 {len(self.fact_articles)} 篇")
-
+        
         # 去重和筛选最重要的10篇
         unique_facts = []
         seen_ids = set()
@@ -340,12 +319,11 @@ class EnhancedNewsAnalyzer:
                 unique_facts.append(article)
                 seen_ids.add(article['id'])
         self.fact_articles = sorted(
-            unique_facts,
-            key=lambda x: (x.get('importance', 5),
-                           datetime.strptime(x['time'], '%Y-%m-%d %H:%M') if x.get('time') else datetime.now()),
+            unique_facts, 
+            key=lambda x: (x.get('importance', 5), datetime.strptime(x['time'], '%Y-%m-%d %H:%M') if x.get('time') else datetime.now()), 
             reverse=True
         )[:10]
-
+    
     # ==================== 原有AI分析功能（保持不变） ====================
     def fetch_all_news(self):
         """抓取所有新闻"""
@@ -362,16 +340,16 @@ class EnhancedNewsAnalyzer:
                 time.sleep(1)
             except Exception as e:
                 print(f"    ❌ 抓取失败: {e}")
-
+        
         print(f"✅ AI新闻抓取完成！共获得 {len(self.ai_articles)} 篇")
-
+    
     def analyze_with_zhipu(self, article):
         """使用智谱AI分析文章"""
         try:
             from zhipuai import ZhipuAI
-
+            
             client = ZhipuAI(api_key=self.zhipu_api_key)
-
+            
             prompt = f"""作为新闻分析师，请分析以下文章：
 
 标题：{article['title']}
@@ -392,7 +370,7 @@ class EnhancedNewsAnalyzer:
 - attention_reason: 字符串
 - content_tags: 列表，内容标签
 """
-
+            
             response = client.chat.completions.create(
                 model="glm-3-turbo",  # 使用性价比更高的模型
                 messages=[
@@ -402,10 +380,10 @@ class EnhancedNewsAnalyzer:
                 temperature=0.3,
                 max_tokens=600
             )
-
+            
             result_text = response.choices[0].message.content
             json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
-
+            
             if json_match:
                 analysis_result = json.loads(json_match.group())
             else:
@@ -416,7 +394,7 @@ class EnhancedNewsAnalyzer:
                     "attention_reason": "值得关注的新闻报道",
                     "content_tags": ["新闻"]
                 }
-
+            
             return {
                 'content_tags': analysis_result.get('content_tags', ['新闻']),
                 'importance_level': analysis_result.get('importance_level', '中'),
@@ -425,15 +403,15 @@ class EnhancedNewsAnalyzer:
                 'key_points': analysis_result.get('key_points', []),
                 'source': 'zhipu_ai'
             }
-
+            
         except Exception as e:
             print(f"⚠️ 智谱AI分析失败: {e}")
             return self._fallback_analysis(article)
-
+    
     def _fallback_analysis(self, article):
         """备用关键词分析"""
         text = f"{article['title']} {article.get('summary', '')}".lower()
-
+        
         # 根据内容判断类别
         tags = []
         if any(word in text for word in ['politics', 'government', 'policy', '政治', '政府']):
@@ -448,7 +426,7 @@ class EnhancedNewsAnalyzer:
             tags.append('环境')
         if not tags:
             tags = ['综合新闻']
-
+        
         return {
             'content_tags': tags,
             'importance_level': '中',
@@ -457,28 +435,28 @@ class EnhancedNewsAnalyzer:
             'key_points': tags,
             'source': 'keyword_analysis'
         }
-
+    
     def generate_deep_analyses(self, limit=3):
         """生成深度分析（AI新闻）"""
         if not self.ai_articles:
             return []
-
+        
         important_articles = sorted(
             self.ai_articles,
             key=lambda x: x.get('importance', 5),
             reverse=True
         )[:limit]
-
+        
         print(f"\n🔍 开始深度分析 {len(important_articles)} 篇AI文章...")
-
+        
         analyses = []
         for i, article in enumerate(important_articles, 1):
             print(f"  {i}. 分析: {article['title'][:60]}...")
             analysis = self.analyze_with_zhipu(article)
-
+            
             # 如果有翻译，使用翻译
             title_display = article.get('title_translated', article['title'])
-
+            
             analysis_text = f"""## 📊 {title_display}
 
 **来源**: {article['source']} | **时间**: {article.get('time', 'N/A')}
@@ -507,13 +485,13 @@ class EnhancedNewsAnalyzer:
                 'analysis': analysis,
                 'text': analysis_text
             })
-
+            
             if self.zhipu_api_key:
                 time.sleep(1)  # API调用间隔
-
+        
         self.deep_analyses = analyses
         return analyses
-
+    
     def select_featured_articles(self):
         """选择精选文章"""
         if self.ai_articles:
@@ -523,7 +501,7 @@ class EnhancedNewsAnalyzer:
             )
             if scored_ai:
                 self.featured_article = scored_ai[0][1]
-
+        
         if self.fact_articles:
             # 事实新闻按重要性和时效性评分
             for article in self.fact_articles:
@@ -534,7 +512,7 @@ class EnhancedNewsAnalyzer:
                 if article.get('comments', 0) > 20:
                     score += 1
                 article['_score'] = score
-
+            
             scored_facts = sorted(
                 self.fact_articles,
                 key=lambda x: x.get('_score', 5),
@@ -542,19 +520,19 @@ class EnhancedNewsAnalyzer:
             )
             if scored_facts:
                 self.featured_fact = scored_facts[0]
-
+    
     def format_fact_news_section(self):
         """格式化事实新闻部分，提供中英文对照如果可用"""
         if not self.fact_articles:
             return ""
-
+        
         section = f"""
 ## 🌍 48小时事实资讯速览 ({len(self.fact_articles)}篇)
 
 **新闻来源**: {', '.join(set([a['source'] for a in self.fact_articles[:10]]))}
 
 """
-
+        
         # 按语言/地区分组
         articles_by_lang = {}
         for article in self.fact_articles[:10]:  # 确保最多10篇
@@ -562,65 +540,67 @@ class EnhancedNewsAnalyzer:
             if lang not in articles_by_lang:
                 articles_by_lang[lang] = []
             articles_by_lang[lang].append(article)
-
+        
         for lang, articles in articles_by_lang.items():
             lang_name = {'en': '🌐 国际新闻', 'zh': '🇨🇳 中文新闻'}.get(lang, '📌 其他新闻')
             section += f"\n### {lang_name}\n"
-
+            
             for i, article in enumerate(articles, 1):
                 # 添加简短的亮点符号
                 emoji = "⭐️" if article.get('importance', 0) > 7 else "📌"
                 title = article.get('title_translated', article['title'])
                 orig_title = article['title'] if 'title_translated' in article else ''
-
+                
                 source = article['source']
-
+                
                 section += f"{i}. {emoji} **{title}**"
                 if orig_title:
                     section += f" (Original: {orig_title})"
                 section += "\n"
                 section += f"   📍 {source}"
-
+                
                 # 添加互动数据（如果有）
                 if article.get('points', 0) > 0:
                     section += f" | 👍 {article['points']}"
                 if article.get('comments', 0) > 0:
                     section += f" | 💬 {article['comments']}"
-
+                
                 section += f"\n   🔗 [阅读原文]({article['link']})\n\n"
-
+        
         # 添加精选事实新闻
         if self.featured_fact:
             featured_title = self.featured_fact.get('title_translated', self.featured_fact['title'])
-            featured_summary = self.featured_fact.get('summary_translated',
-                                                      self.featured_fact.get('summary', '点击链接查看详情'))
+            featured_summary = self.featured_fact.get('summary_translated', self.featured_fact.get('summary', '点击链接查看详情'))
             orig_title = self.featured_fact['title'] if 'title_translated' in self.featured_fact else ''
             orig_summary = self.featured_fact.get('summary', '') if 'summary_translated' in self.featured_fact else ''
-
+            
+            orig_title_part = "(Original: " + orig_title + ")" if orig_title else ""
+            orig_summary_part = "\n\nOriginal Summary: " + orig_summary if orig_summary else ""
+            
             section += f"""
 ## 📰 今日事实精选
 
-**{featured_title}** {f"(Original: {orig_title})" if orig_title else ""}
+**{featured_title}** {orig_title_part}
 
 **来源**: {self.featured_fact['source']} | **时间**: {self.featured_fact.get('time', '今日')}
 
-**摘要**: {featured_summary} {f"\n\nOriginal Summary: {orig_summary}" if orig_summary else ""}
+**摘要**: {featured_summary}{orig_summary_part}
 
 **🔗 深度阅读**: {self.featured_fact['link']}
 """
-
+        
         section += f"""
 ---
 *事实新闻来自 {len(set([a['source'] for a in self.fact_articles]))} 个国内外权威媒体*
 *每日筛选过去48小时最重要新闻，保持信息广度与深度*
 """
-
+        
         return section
-
+    
     def generate_report(self):
         """生成完整报告"""
         current_time = datetime.now().strftime('%Y-%m-%d %H:%M')
-
+        
         report = f"""# 📊 每日资讯双报告 ({current_time})
 
 ## 📈 数据总览
@@ -630,7 +610,7 @@ class EnhancedNewsAnalyzer:
 - **覆盖媒体**: {len(self.ai_news_sources) + len(self.fact_news_sources)} 个
 
 """
-
+        
         # 1. AI科技新闻部分
         if self.ai_articles:
             report += f"""
@@ -645,14 +625,14 @@ class EnhancedNewsAnalyzer:
                 if cat not in ai_by_category:
                     ai_by_category[cat] = []
                 ai_by_category[cat].append(article)
-
+            
             category_names = {
                 'research': '🧪 研究前沿',
                 'tech': '🔧 技术动态',
                 'community': '👥 社区热点',
                 'cn_ai': '🇨🇳 国内AI'
             }
-
+            
             for cat, articles in ai_by_category.items():
                 name = category_names.get(cat, '📌 其他')
                 report += f"\n**{name}**\n"
@@ -660,20 +640,19 @@ class EnhancedNewsAnalyzer:
                     title_display = article.get('title_translated', article['title'])
                     report += f"{i}. {title_display}\n"
                     report += f"   📍 {article['source']} | 🔗 [阅读原文]({article['link']})\n"
-
+            
             # AI深度分析
             if self.deep_analyses:
                 report += "\n## 🔍 AI深度分析\n"
                 report += "_以下AI文章已进行详细技术分析：_\n\n"
                 for analysis in self.deep_analyses:
                     report += analysis['text']
-
+            
             # AI精选
             if self.featured_article:
                 featured_title = self.featured_article.get('title_translated', self.featured_article['title'])
-                featured_summary = self.featured_article.get('summary_translated',
-                                                             self.featured_article.get('summary', '暂无摘要'))
-
+                featured_summary = self.featured_article.get('summary_translated', self.featured_article.get('summary', '暂无摘要'))
+                
                 report += f"""
 ## 🏆 今日AI精选
 
@@ -684,10 +663,10 @@ class EnhancedNewsAnalyzer:
 
 **🔗 深度阅读**: {self.featured_article['link']}
 """
-
+        
         # 2. 事实新闻部分
         report += self.format_fact_news_section()
-
+        
         # 3. 总结
         report += f"""
 
@@ -701,11 +680,11 @@ class EnhancedNewsAnalyzer:
 
 *保持信息敏感度，拥抱科技变革，关注世界动态*
 """
-
+        
         title = f"资讯双报告 {datetime.now().strftime('%m-%d')} | AI:{len(self.ai_articles)} 事实:{len(self.fact_articles)}"
-
+        
         return report, title
-
+    
     def save_reports(self, report):
         """保存报告"""
         output_data = {
@@ -718,35 +697,35 @@ class EnhancedNewsAnalyzer:
             'ai_articles': self.ai_articles[:20],
             'fact_articles': self.fact_articles[:10]
         }
-
+        
         with open('enhanced_news_analysis.json', 'w', encoding='utf-8') as f:
             json.dump(output_data, f, ensure_ascii=False, indent=2)
-
+        
         with open('enhanced_news_report.md', 'w', encoding='utf-8') as f:
             f.write(report)
-
+        
         print("💾 报告已保存至: enhanced_news_analysis.json, enhanced_news_report.md")
-
+    
     def send_to_wechat(self, report):
         """通过Server酱发送到微信"""
         if not self.server_chan_key:
             print("⚠️ 未配置Server酱密钥，跳过推送")
             return False
-
+        
         url = f"https://sctapi.ftqq.com/{self.server_chan_key}.send"
-
+        
         if len(report) > 6000:
             report = report[:6000] + "\n\n...（报告过长，已截断，完整内容请查看保存的文件）"
-
+        
         data = {
             'title': f"资讯双报告 {datetime.now().strftime('%m-%d')} | AI:{len(self.ai_articles)} 事实:{len(self.fact_articles)}",
             'desp': report
         }
-
+        
         try:
             response = requests.post(url, data=data, timeout=15)
             result = response.json()
-
+            
             if result.get('code') == 0:
                 print(f"✅ 微信推送成功！消息ID: {result.get('data', {}).get('pushid')}")
                 return True
@@ -756,55 +735,54 @@ class EnhancedNewsAnalyzer:
         except Exception as e:
             print(f"❌ 推送请求失败: {e}")
             return False
-
+    
     def run(self):
         """主执行函数"""
         print("=" * 70)
         print("📊 增强版资讯分析系统启动")
         print(f"📅 执行时间: {datetime.now()}")
         print("=" * 70)
-
+        
         # 1. 抓取AI新闻
         self.fetch_all_news()
-
+        
         # 2. 抓取事实新闻
         self.fetch_fact_news()
-
+        
         if not self.all_articles:
             print("❌ 未抓取到任何文章，程序退出")
             return None, "无内容"
-
+        
         # 3. 生成AI深度分析
         self.generate_deep_analyses(limit=3)
-
+        
         # 4. 选择精选文章
         self.select_featured_articles()
-
+        
         # 5. 生成报告
         report, title = self.generate_report()
-
+        
         # 6. 保存报告
         self.save_reports(report)
-
+        
         print(f"\n📊 报告生成完成:")
         print(f"   AI资讯: {len(self.ai_articles)} 篇")
         print(f"   事实资讯: {len(self.fact_articles)} 篇")
         print(f"   报告标题: {title}")
-
+        
         return report, title
-
 
 def main():
     analyzer = EnhancedNewsAnalyzer()
     report, title = analyzer.run()
-
+    
     if report:
         if analyzer.server_chan_key:
             print("\n📤 正在发送到微信...")
             analyzer.send_to_wechat(report)
         else:
             print("\n⚠️ 未配置SERVER_CHAN_KEY，跳过推送")
-
+        
         # 打印预览
         print("\n" + "=" * 70)
         print("📋 内容预览:")
@@ -813,7 +791,6 @@ def main():
         print(report[:preview_length] + "..." if len(report) > preview_length else report)
     else:
         print("❌ 未生成报告，请检查配置")
-
 
 if __name__ == "__main__":
     main()
