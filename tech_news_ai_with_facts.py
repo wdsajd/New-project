@@ -293,13 +293,14 @@ class EnhancedNewsAnalyzer:
             return None
     
     # ==================== 新增：抓取事实新闻 ====================
-    def fetch_fact_news(self):
+        def fetch_fact_news(self):
         """抓取多方面事实新闻"""
         print("\n📰 开始抓取多方面事实新闻（过去48小时）...")
         
         for source in self.fact_news_sources:
             print(f"  → {source['name']}")
             try:
+                article['priority'] = source.get('priority', 5)  # 新增：在抓取时加入 priority 到 article
                 if source['type'] == 'rss':
                     self.fetch_rss(source, article_type='fact')
                 elif source['type'] == 'hn_api':
@@ -311,24 +312,23 @@ class EnhancedNewsAnalyzer:
         
         print(f"✅ 事实新闻抓取完成！共获得 {len(self.fact_articles)} 篇")
         
-        # 去重和筛选最重要的10篇
+        # 去重和筛选最重要的12篇（按 priority + importance + time 排序）
         unique_facts = []
         seen_ids = set()
         for article in self.fact_articles:
             if article['id'] not in seen_ids:
                 unique_facts.append(article)
                 seen_ids.add(article['id'])
-        
-        # 去重后按优先级 + 时效 + 重要性排序
+
         self.fact_articles = sorted(
             unique_facts,
             key=lambda x: (
-                -x.get('priority', 5),  # 高优先级源排前
-                datetime.strptime(x['time'], '%Y-%m-%d %H:%M') if x.get('time') else datetime.now(),
-                x.get('importance', 5)
+                -x.get('priority', 5),  # 高优先级
+                x.get('importance', 5),
+                datetime.strptime(x['time'], '%Y-%m-%d %H:%M') if x.get('time') else datetime.now()
             ),
             reverse=True
-        )[:12]  # 最多取12条，再在报告中分中/外各显示5-8条
+        )[:12]  # 最多12条
     
     # ==================== 原有AI分析功能（保持不变） ====================
     def fetch_all_news(self):
@@ -557,22 +557,25 @@ class EnhancedNewsAnalyzer:
             print(f"⚠️ 生成摘要失败: {e}")
             return article.get('summary_translated', article.get('summary', '暂无摘要'))[:100] + '...'
     
-    def format_fact_news_section(self):
+        def format_fact_news_section(self):
         """格式化事实新闻部分，分组显示国内 + 国际"""
         if not self.fact_articles:
             return ""
-        
+
         section = f"""
 ## 🌍 48小时事实资讯速览 ({len(self.fact_articles)}篇)
 
 *事实新闻来自 {len(set([a['source'] for a in self.fact_articles]))} 个国内外权威媒体*
 *筛选过去48小时最重要新闻，保持信息广度与深度*
 """
-        
-        # 分组：国内新闻
-        domestic = [a for a in self.fact_articles if a.get('lang') == 'zh' or a.get('category') in ['china', 'cn']]
+
+        # 分组：国内新闻（中文或 category=china）
+        domestic = [
+            a for a in self.fact_articles 
+            if a.get('lang') == 'zh' or a.get('category') in ['china', 'cn']
+        ]
         domestic = sorted(domestic, key=lambda x: x.get('importance', 5), reverse=True)[:7]
-        
+
         if domestic:
             section += f"""
 ### 🇨🇳 国内新闻
@@ -582,16 +585,19 @@ class EnhancedNewsAnalyzer:
                 title_cn = article.get('title_translated', title_orig)
                 source = article['source']
                 link = article['link']
-                
+
                 section += f"{i}. **{title_orig}**\n"
                 if title_cn != title_orig:
                     section += f"   {title_cn}\n"
                 section += f"   📍 {source} | 🔗 [阅读原文]({link})\n\n"
-        
-        # 分组：国际新闻
-        international = [a for a in self.fact_articles if a.get('lang') != 'zh' or a.get('category') in ['world', 'asia', 'international']]
+
+        # 分组：国际新闻（英文或其他，或 category=world/asia）
+        international = [
+            a for a in self.fact_articles 
+            if a.get('lang') != 'zh' or a.get('category') in ['world', 'asia', 'international']
+        ]
         international = sorted(international, key=lambda x: x.get('importance', 5), reverse=True)[:7]
-        
+
         if international:
             section += f"""
 ### 🌐 国际新闻
@@ -601,31 +607,37 @@ class EnhancedNewsAnalyzer:
                 title_cn = article.get('title_translated', title_orig)
                 source = article['source']
                 link = article['link']
-                
+
                 section += f"{i}. **{title_orig}**\n"
                 if title_cn != title_orig:
                     section += f"   {title_cn}\n"
                 section += f"   📍 {source} | 🔗 [阅读原文]({link})\n\n"
-        
-        # 添加精选事实新闻
+
+        # 如果有精选事实新闻
         if self.featured_fact:
-            featured_title = self.featured_fact.get('title_translated', self.featured_fact['title'])
-            featured_summary = self.featured_fact.get('generated_summary', self.featured_fact.get('summary_translated', self.featured_fact.get('summary', '暂无摘要')))
-            orig_title = self.featured_fact['title'] if 'title_translated' in self.featured_fact else ''
+            featured = self.featured_fact
+            title_orig = featured['title']
+            title_cn = featured.get('title_translated', title_orig)
             
+            # 使用生成的摘要
+            summary_text = featured.get('generated_summary', featured.get('summary_translated', featured.get('summary', '暂无摘要')))
+            if len(summary_text) > 120:
+                summary_text = summary_text[:117] + "…"
+
             section += f"""
 ## 📰 今日事实精选
 
-**{featured_title}** {f"(Original: {orig_title})" if orig_title else ""}
+**{title_orig}**  
+{title_cn if title_cn != title_orig else ''}
 
-**来源**: {self.featured_fact['source']} | **时间**: {self.featured_fact.get('time', '今日')}
+**来源**：{featured['source']} | **时间**：{featured.get('time', '今日')}
 
-**摘要**: {featured_summary}
+**摘要**：{summary_text}
 
-**🔗 深度阅读**: {self.featured_fact['link']}
+**深度阅读**：{featured['link']}
 """
-        
-        return section
+
+        return section  # 確保這行縮進正確（4 spaces）
     
     def generate_report(self):
         """生成完整报告"""
@@ -765,7 +777,7 @@ class EnhancedNewsAnalyzer:
             print(f"❌ 推送请求失败: {e}")
             return False
     
-    def run(self):
+        def run(self):
         """主执行函数"""
         print("=" * 70)
         print("📊 增强版资讯分析系统启动")
@@ -775,12 +787,31 @@ class EnhancedNewsAnalyzer:
         # 1. 抓取AI新闻
         self.fetch_all_news()
         
-        # 2. 抓取事实新闻
+        # 2. 抓取事实新闻（排序已移到 fetch_fact_news 內）
         self.fetch_fact_news()
         
         if not self.all_articles:
             print("❌ 未抓取到任何文章，程序退出")
             return None, "无内容"
+        
+        # 3. 生成AI深度分析
+        self.generate_deep_analyses(limit=3)
+        
+        # 4. 选择精选文章
+        self.select_featured_articles()
+        
+        # 5. 生成报告
+        report, title = self.generate_report()
+        
+        # 6. 保存报告
+        self.save_reports(report)
+        
+        print(f"\n📊 报告生成完成:")
+        print(f"   AI资讯: {len(self.ai_articles)} 篇")
+        print(f"   事实资讯: {len(self.fact_articles)} 篇")
+        print(f"   报告标题: {title}")
+        
+        return report, title
         
         # 3. 生成AI深度分析
         self.generate_deep_analyses(limit=3)
