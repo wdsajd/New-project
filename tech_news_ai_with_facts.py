@@ -33,22 +33,21 @@ class EnhancedNewsAnalyzer:
         
         # 更新：多方面事实新闻源，优先中国国内可访问来源，减少重复和过时
         self.fact_news_sources = [
-    # 国内权威主流媒体（优先，确保可访问）
-    {'name': '央视新闻', 'url': 'http://news.cctv.com/rss/china/index.xml', 'type': 'rss', 'category': 'china', 'lang': 'zh', 'priority': 10},
-    {'name': '新华网', 'url': 'http://www.news.cn/rss/world.xml', 'type': 'rss', 'category': 'world', 'lang': 'zh', 'priority': 9},  # 新华国际频道
-    {'name': '澎湃新闻 要闻', 'url': 'https://rsshub.app/thepaper/featured', 'type': 'rss', 'category': 'china', 'lang': 'zh', 'priority': 8},
-    {'name': '人民网 国际', 'url': 'http://world.people.com.cn/rss/5752.xml', 'type': 'rss', 'category': 'world', 'lang': 'zh', 'priority': 7},
-    {'name': '环球时报', 'url': 'https://rsshub.app/huanqiu/news', 'type': 'rss', 'category': 'world', 'lang': 'zh', 'priority': 7},  # 国际视角强
-
-    # 国际新闻（中文/英文平衡，优先中文可访问）
-    {'name': 'BBC中文网', 'url': 'https://feeds.bbci.co.uk/zhongwen/simp/rss.xml', 'type': 'rss', 'category': 'world', 'lang': 'zh', 'priority': 9},
-    {'name': 'Reuters 国际', 'url': 'https://www.reuters.com/arc/outboundfeeds/rss/?outputType=xml', 'type': 'rss', 'category': 'world', 'lang': 'en', 'priority': 8},
-    {'name': '联合早报 国际', 'url': 'https://www.zaobao.com.sg/realtime/world/rss', 'type': 'rss', 'category': 'world', 'lang': 'zh', 'priority': 7},
-
-    # 补充源（社区/综合，降低权重）
-    {'name': 'Hacker News Top', 'url': 'https://hn.algolia.com/api/v1/search_by_date?tags=story&numericFilters=created_at_i>{}', 'type': 'hn_api', 'category': 'tech', 'lang': 'en', 'priority': 4},
-    {'name': 'Reddit World News', 'url': 'https://www.reddit.com/r/worldnews/.rss', 'type': 'rss', 'category': 'world', 'lang': 'en', 'priority': 4},
-]
+            # 国内新闻（优先可访问来源）
+            {'name': '央视网', 'url': 'http://news.cctv.com/rss/index.xml', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
+            {'name': '新华网', 'url': 'http://www.news.cn/rss/rsstw.xml', 'type': 'rss', 'category': 'china', 'lang': 'zh'},  # 更新为更稳定的新华网RSS
+            {'name': '人民日报', 'url': 'http://www.people.com.cn/rss/politics.xml', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
+            {'name': '澎湃新闻', 'url': 'https://rsshub.app/thepaper/featured', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
+            {'name': '虎扑社区', 'url': 'https://rsshub.app/hupu/bbs/all', 'type': 'rss', 'category': 'community', 'lang': 'zh'},  # 添加虎扑 via RSSHub
+            {'name': '腾讯新闻', 'url': 'https://rsshub.app/tencent/news/author/1', 'type': 'rss', 'category': 'china', 'lang': 'zh'},  # 添加腾讯新闻
+            # 国际/亚太新闻（选择在中国可访问或中立来源）
+            {'name': '联合早报', 'url': 'https://www.zaobao.com/realtime/china/rss', 'type': 'rss', 'category': 'asia', 'lang': 'zh'},  # 更新为中国实时
+            {'name': 'BBC中文', 'url': 'https://feeds.bbci.co.uk/zhongwen/simp/rss.xml', 'type': 'rss', 'category': 'world', 'lang': 'zh'},  # BBC中文版，可访问
+            {'name': 'Reuters China', 'url': 'https://www.reuters.com/arc/outboundfeeds/rss/world/china/', 'type': 'rss', 'category': 'world', 'lang': 'en'},  # Reuters中国相关
+            # 社区/综合
+            {'name': 'Reddit World News', 'url': 'https://www.reddit.com/r/worldnews/.rss', 'type': 'rss', 'category': 'world', 'lang': 'en'},
+            {'name': 'Hacker News Top', 'url': 'https://hn.algolia.com/api/v1/search_by_date?tags=story&numericFilters=created_at_i>{}', 'type': 'hn_api', 'category': 'tech', 'lang': 'en'},
+        ]
         
         self.all_articles = []
         self.ai_articles = []
@@ -253,31 +252,22 @@ class EnhancedNewsAnalyzer:
             
             client = ZhipuAI(api_key=self.zhipu_api_key)
             
-            prompt = f"""作为专业的AI论文/科技新闻分析师，请基于以下文章内容进行深度分析：
+            prompt = f"""作为专业翻译，请将以下英文内容翻译成贴合实际、自然流畅的中文：
+标题：{title}
+摘要：{summary}
 
-标题：{article['title']}
-来源：{article['source']}
-摘要/内容：{article.get('summary', '暂无详细摘要')}
+请提供中英文对照：
+- 原标题：[original title]
+- 翻译标题：[translated title]
+- 原摘要：[original summary]
+- 翻译摘要：[translated summary]
 
-请严格按照以下要求输出 **JSON** 格式，不要添加任何多余文字：
-
+输出JSON格式：
 {{
-  "content_summary": "200-300字的中文内容摘要，提炼论文/文章最核心贡献、方法、实验结果和结论。语言专业、客观、精炼。",
-  "content_tags": ["标签1", "标签2", ...]  // 5-10个细粒度、具体的关键词/短语标签，覆盖主题、方法、创新点、技术、基准等",
-  "importance_level": "高/中/低",  // 根据创新性、影响力、难度等综合判断
-  "impact_scope": "一句话描述影响范围，例如：'AI推理机制研究社区、长上下文模型设计、mechanistic interpretability领域'",
-  "attention_reason": "先写1-2句具体理由（结合论文核心创新点），然后用'相关标签：标签1、标签2、...' 结尾。理由要体现为什么值得关注。",
-  "key_points": ["标签式核心点1", "标签式核心点2", ...]  // 5-10条，每条用简短标签/关键词短语形式，不要写完整句子
+  "title": "translated title",
+  "summary": "translated summary"
 }}
-
-示例输出结构（仅供参考，不要直接复制）：
-"content_summary": "本文提出... 在...基准上达到...，首次揭示...",
-"content_tags": ["流体推理表示", "上下文内表示精炼", "QwQ-32B", "steering实验", "Mystery Blocksworld"],
-"importance_level": "高",
-"impact_scope": "对理解长链推理模型内部机制有重要贡献，有望指导下一代推理模型设计",
-"attention_reason": "首次系统揭示推理过程中表示动态精炼机制，并通过因果实验验证其作用，对提升推理模型可解释性和效率有指导意义。相关标签：流体推理表示、表示精炼、steering验证、抽象结构编码",
-"key_points": ["流体推理表示", "token表示动态精炼", "从具体到抽象迁移", "Mystery Blocksworld测试", "steering因果干预"]
-}}
+但在报告中可显示完整对照。
 """
             
             response = client.chat.completions.create(
@@ -328,11 +318,17 @@ class EnhancedNewsAnalyzer:
             if article['id'] not in seen_ids:
                 unique_facts.append(article)
                 seen_ids.add(article['id'])
+        
+        # 去重后按优先级 + 时效 + 重要性排序
         self.fact_articles = sorted(
-            unique_facts, 
-            key=lambda x: (x.get('importance', 5), datetime.strptime(x['time'], '%Y-%m-%d %H:%M') if x.get('time') else datetime.now()), 
+            unique_facts,
+            key=lambda x: (
+                -x.get('priority', 5),  # 高优先级源排前
+                datetime.strptime(x['time'], '%Y-%m-%d %H:%M') if x.get('time') else datetime.now(),
+                x.get('importance', 5)
+            ),
             reverse=True
-        )[:10]
+        )[:12]  # 最多取12条，再在报告中分中/外各显示5-8条
     
     # ==================== 原有AI分析功能（保持不变） ====================
     def fetch_all_news(self):
@@ -467,10 +463,6 @@ class EnhancedNewsAnalyzer:
             # 如果有翻译，使用翻译
             title_display = article.get('title_translated', article['title'])
             
-            # 使用翻译标题（如果有）
-            title_display = article.get('title_translated', article['title'])
-            orig_title = article['title'] if 'title_translated' in article else title_display
-            
             analysis_text = f"""### 📑 论文 {title_display}
 
 **来源**: {article['source']} | **时间**: {article.get('time', 'N/A')} | **AI分析模型**: 🤖 智谱GLM
@@ -533,26 +525,54 @@ class EnhancedNewsAnalyzer:
             )
             if scored_facts:
                 self.featured_fact = scored_facts[0]
+                self.featured_fact['generated_summary'] = self.generate_fact_summary(self.featured_fact)
+    
+    def generate_fact_summary(self, article):
+        """为事实精选生成简短摘要"""
+        if not self.zhipu_api_key:
+            return article.get('summary_translated', article.get('summary', '暂无摘要'))[:100] + '...'
+        
+        try:
+            from zhipuai import ZhipuAI
+            client = ZhipuAI(api_key=self.zhipu_api_key)
+            
+            prompt = f"""基于以下新闻标题和链接，生成80-120字中文摘要：
+标题：{article['title']}
+链接：{article['link']}
+
+摘要要求：提炼核心事件/内容/数据/意义，语言客观专业。"""
+            
+            response = client.chat.completions.create(
+                model="glm-3-turbo",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=150
+            )
+            
+            summary = response.choices[0].message.content.strip()
+            if len(summary) > 120:
+                summary = summary[:117] + "..."
+            return summary
+        except Exception as e:
+            print(f"⚠️ 生成摘要失败: {e}")
+            return article.get('summary_translated', article.get('summary', '暂无摘要'))[:100] + '...'
     
     def format_fact_news_section(self):
         """格式化事实新闻部分，分组显示国内 + 国际"""
         if not self.fact_articles:
             return ""
-
+        
         section = f"""
 ## 🌍 48小时事实资讯速览 ({len(self.fact_articles)}篇)
 
 *事实新闻来自 {len(set([a['source'] for a in self.fact_articles]))} 个国内外权威媒体*
 *筛选过去48小时最重要新闻，保持信息广度与深度*
 """
-
-        # 分组：国内新闻（中文或 category=china）
-        domestic = [
-            a for a in self.fact_articles 
-            if a.get('lang') == 'zh' or a.get('category') in ['china', 'cn']
-        ]
+        
+        # 分组：国内新闻
+        domestic = [a for a in self.fact_articles if a.get('lang') == 'zh' or a.get('category') in ['china', 'cn']]
         domestic = sorted(domestic, key=lambda x: x.get('importance', 5), reverse=True)[:7]
-
+        
         if domestic:
             section += f"""
 ### 🇨🇳 国内新闻
@@ -562,19 +582,16 @@ class EnhancedNewsAnalyzer:
                 title_cn = article.get('title_translated', title_orig)
                 source = article['source']
                 link = article['link']
-
+                
                 section += f"{i}. **{title_orig}**\n"
                 if title_cn != title_orig:
                     section += f"   {title_cn}\n"
                 section += f"   📍 {source} | 🔗 [阅读原文]({link})\n\n"
-
-        # 分组：国际新闻（英文或其他，或 category=world/asia）
-        international = [
-            a for a in self.fact_articles 
-            if a.get('lang') != 'zh' or a.get('category') in ['world', 'asia', 'international']
-        ]
+        
+        # 分组：国际新闻
+        international = [a for a in self.fact_articles if a.get('lang') != 'zh' or a.get('category') in ['world', 'asia', 'international']]
         international = sorted(international, key=lambda x: x.get('importance', 5), reverse=True)[:7]
-
+        
         if international:
             section += f"""
 ### 🌐 国际新闻
@@ -584,108 +601,28 @@ class EnhancedNewsAnalyzer:
                 title_cn = article.get('title_translated', title_orig)
                 source = article['source']
                 link = article['link']
-
+                
                 section += f"{i}. **{title_orig}**\n"
                 if title_cn != title_orig:
                     section += f"   {title_cn}\n"
                 section += f"   📍 {source} | 🔗 [阅读原文]({link})\n\n"
-
-        # 如果有精选事实新闻
-        # ── 今日事实精选 ─────────────────────────────
-    if self.featured_fact:
-        featured = self.featured_fact
-        title_orig = featured['title']
-        title_cn = featured.get('title_translated', title_orig)
-
-        # 使用生成的摘要（如果有），否则 fallback
-        summary_text = featured.get('generated_summary',
-                                   featured.get('summary_translated',
-                                               featured.get('summary', '暂无可用摘要')))
-
-        # 控制长度
-        if len(summary_text) > 120:
-            summary_text = summary_text[:117] + "…"
-
-        section += f"""
-## 📰 今日事实精选
-
-**{title_orig}**  
-{title_cn if title_cn != title_orig else ''}
-
-**来源**：{featured['source']} | **时间**：{featured.get('time', '今日')}
-
-**摘要**：{summary_text}
-
-**深度阅读**：{featured['link']}
-"""
-        return section
-        section = f"""
-## 🌍 48小时事实资讯速览 ({len(self.fact_articles)}篇)
-
-**新闻来源**: {', '.join(set([a['source'] for a in self.fact_articles[:10]]))}
-
-"""
-        
-        # 按语言/地区分组
-        articles_by_lang = {}
-        for article in self.fact_articles[:10]:  # 确保最多10篇
-            lang = article.get('lang', 'en')
-            if lang not in articles_by_lang:
-                articles_by_lang[lang] = []
-            articles_by_lang[lang].append(article)
-        
-        for lang, articles in articles_by_lang.items():
-            lang_name = {'en': '🌐 国际新闻', 'zh': '🇨🇳 中文新闻'}.get(lang, '📌 其他新闻')
-            section += f"\n### {lang_name}\n"
-            
-            for i, article in enumerate(articles, 1):
-                # 添加简短的亮点符号
-                emoji = "⭐️" if article.get('importance', 0) > 7 else "📌"
-                title = article.get('title_translated', article['title'])
-                orig_title = article['title'] if 'title_translated' in article else ''
-                
-                source = article['source']
-                
-                section += f"{i}. {emoji} **{title}**"
-                if orig_title:
-                    section += f" (Original: {orig_title})"
-                section += "\n"
-                section += f"   📍 {source}"
-                
-                # 添加互动数据（如果有）
-                if article.get('points', 0) > 0:
-                    section += f" | 👍 {article['points']}"
-                if article.get('comments', 0) > 0:
-                    section += f" | 💬 {article['comments']}"
-                
-                section += f"\n   🔗 [阅读原文]({article['link']})\n\n"
         
         # 添加精选事实新闻
         if self.featured_fact:
             featured_title = self.featured_fact.get('title_translated', self.featured_fact['title'])
-            featured_summary = self.featured_fact.get('summary_translated', self.featured_fact.get('summary', '点击链接查看详情'))
+            featured_summary = self.featured_fact.get('generated_summary', self.featured_fact.get('summary_translated', self.featured_fact.get('summary', '暂无摘要')))
             orig_title = self.featured_fact['title'] if 'title_translated' in self.featured_fact else ''
-            orig_summary = self.featured_fact.get('summary', '') if 'summary_translated' in self.featured_fact else ''
-            
-            orig_title_part = "(Original: " + orig_title + ")" if orig_title else ""
-            orig_summary_part = "\n\nOriginal Summary: " + orig_summary if orig_summary else ""
             
             section += f"""
 ## 📰 今日事实精选
 
-**{featured_title}** {orig_title_part}
+**{featured_title}** {f"(Original: {orig_title})" if orig_title else ""}
 
 **来源**: {self.featured_fact['source']} | **时间**: {self.featured_fact.get('time', '今日')}
 
-**摘要**: {featured_summary}{orig_summary_part}
+**摘要**: {featured_summary}
 
 **🔗 深度阅读**: {self.featured_fact['link']}
-"""
-        
-        section += f"""
----
-*事实新闻来自 {len(set([a['source'] for a in self.fact_articles]))} 个国内外权威媒体*
-*每日筛选过去48小时最重要新闻，保持信息广度与深度*
 """
         
         return section
@@ -711,7 +648,6 @@ class EnhancedNewsAnalyzer:
 
 ### 🚀 AI快讯摘要
 """
-# 按类别分组展示AI新闻
             ai_by_category = {}
             for article in self.ai_articles[:15]:
                 cat = article.get('category', 'other')
@@ -728,52 +664,33 @@ class EnhancedNewsAnalyzer:
             
             for cat, articles in ai_by_category.items():
                 name = category_names.get(cat, '📌 其他')
-                report += f"\n**{name}**\n\n"
-                
-                for i, article in enumerate(articles, 1):
-                    # 优先使用翻译标题，如果没有则用原文
+                report += f"\n**{name}**\n"
+                for i, article in enumerate(articles[:3], 1):
                     title_display = article.get('title_translated', article['title'])
-                    orig_title = article['title'] if 'title_translated' in article else title_display
-                    
-                    # 构建两行格式
-                    report += f"{i}. {orig_title}\n"
-                    report += f"   {title_display}\n"
-                    report += f"   *{article['source']}* | [阅读原文]({article['link']})\n\n"
+                    report += f"{i}. {title_display}\n"
+                    report += f"   📍 {article['source']} | 🔗 [阅读原文]({article['link']})\n"
             
-# AI深度分析
+            # AI深度分析
             if self.deep_analyses:
                 report += "\n## 🔍 AI深度分析\n"
                 report += "_以下AI文章已进行详细技术分析：_\n\n"
                 for analysis in self.deep_analyses:
                     report += analysis['text']
             
-# AI精选
+            # AI精选
             if self.featured_article:
-                featured = self.featured_article
-                
-                # 优先使用翻译标题
-                title_en = featured['title']
-                title_cn = featured.get('title_translated', title_en)
-                
-                # 摘要控制在100字以内
-                summary_text = featured.get('summary_translated', featured.get('summary', '暂无摘要'))
-                if len(summary_text) > 100:
-                    summary_text = summary_text[:97] + "…"
-                elif not summary_text.strip():
-                    summary_text = "暂无可用摘要，请点击链接查看原文。"
+                featured_title = self.featured_article.get('title_translated', self.featured_article['title'])
+                featured_summary = self.featured_article.get('summary_translated', self.featured_article.get('summary', '暂无摘要'))
                 
                 report += f"""
 ## 🏆 今日AI精选
 
-**论文 {title_en}**  
-**{title_cn}**
+**{featured_title}**
 
-**来源**：{featured['source']}
+**来源**: {self.featured_article['source']}
+**摘要**: {featured_summary}
 
-**摘要**：  
-{summary_text}
-
-**深度阅读**：[点击查看原文]({featured['link']})
+**🔗 深度阅读**: {self.featured_article['link']}
 """
         
         # 2. 事实新闻部分
@@ -859,16 +776,7 @@ class EnhancedNewsAnalyzer:
         self.fetch_all_news()
         
         # 2. 抓取事实新闻
-        # 去重后按优先级 + 时效 + 重要性排序
-        self.fact_articles = sorted(
-            unique_facts,
-            key=lambda x: (
-                -x.get('priority', 5),                     # 高优先级源排前
-                datetime.strptime(x['time'], '%Y-%m-%d %H:%M') if x.get('time') else datetime.now(),
-                x.get('importance', 5)
-            ),
-            reverse=True
-        )[:12]  # 最多取12条，再在报告中分中/外各显示5-8条
+        self.fetch_fact_news()
         
         if not self.all_articles:
             print("❌ 未抓取到任何文章，程序退出")
