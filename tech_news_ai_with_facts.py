@@ -646,6 +646,7 @@ class EnhancedNewsAnalyzer:
                 for i, article in enumerate(articles, 1):
                     # 只使用翻译标题（如果没有翻译则用原文，但优先翻译）
                     title_display = article.get('title_translated', article['title'])
+                    orig_title = article['title']  # 定义原文标题（如果有翻译，则用原文；否则用 title_display）
                     
                     # 构建两行格式
                     report += f"{i}. {orig_title}\n"
