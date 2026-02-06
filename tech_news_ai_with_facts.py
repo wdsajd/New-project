@@ -557,8 +557,8 @@ class EnhancedNewsAnalyzer:
             print(f"⚠️ 生成摘要失败: {e}")
             return article.get('summary_translated', article.get('summary', '暂无摘要'))[:100] + '...'
     
-        def format_fact_news_section(self):
-        """格式化事实新闻部分，分组显示国内 + 国际"""
+    def format_fact_news_section(self):
+        """整理事实新闻部分，分组显示国内+国际"""
         if not self.fact_articles:
             return ""
 
@@ -569,7 +569,7 @@ class EnhancedNewsAnalyzer:
 *筛选过去48小时最重要新闻，保持信息广度与深度*
 """
 
-        # 分组：国内新闻（中文或 category=china）
+        # ── 国内新闻 ────────────────────────────────
         domestic = [
             a for a in self.fact_articles 
             if a.get('lang') == 'zh' or a.get('category') in ['china', 'cn']
@@ -591,7 +591,7 @@ class EnhancedNewsAnalyzer:
                     section += f"   {title_cn}\n"
                 section += f"   📍 {source} | 🔗 [阅读原文]({link})\n\n"
 
-        # 分组：国际新闻（英文或其他，或 category=world/asia）
+        # ── 国际新闻 ────────────────────────────────
         international = [
             a for a in self.fact_articles 
             if a.get('lang') != 'zh' or a.get('category') in ['world', 'asia', 'international']
@@ -613,14 +613,16 @@ class EnhancedNewsAnalyzer:
                     section += f"   {title_cn}\n"
                 section += f"   📍 {source} | 🔗 [阅读原文]({link})\n\n"
 
-        # 如果有精选事实新闻
+        # ── 今日事实精选 ─────────────────────────────
         if self.featured_fact:
             featured = self.featured_fact
             title_orig = featured['title']
             title_cn = featured.get('title_translated', title_orig)
-            
-            # 使用生成的摘要
-            summary_text = featured.get('generated_summary', featured.get('summary_translated', featured.get('summary', '暂无摘要')))
+
+            summary_text = featured.get('generated_summary',
+                                       featured.get('summary_translated',
+                                                   featured.get('summary', '暂无可用摘要')))
+
             if len(summary_text) > 120:
                 summary_text = summary_text[:117] + "…"
 
@@ -637,7 +639,7 @@ class EnhancedNewsAnalyzer:
 **深度阅读**：{featured['link']}
 """
 
-        return section  # 確保這行縮進正確（4 spaces）
+        return section
     
     def generate_report(self):
         """生成完整报告"""
