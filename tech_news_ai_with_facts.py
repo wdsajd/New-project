@@ -794,7 +794,7 @@ class EnhancedNewsAnalyzer:
         if email_success:
             print("✅ 邮件发送成功！")
         else:
-        print("❌ 邮件发送失败，请检查邮件配置")
+            print("❌ 邮件发送失败，请检查邮件配置")
         print(f"\n📊 报告生成完成:")
         print(f"   AI资讯: {len(self.ai_articles)} 篇")
         print(f"   事实资讯: {len(self.fact_articles)} 篇")
