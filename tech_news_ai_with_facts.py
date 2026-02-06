@@ -816,7 +816,10 @@ class EnhancedNewsAnalyzer:
         return report, title
 
 def main():
-        if report:
+    analyzer = EnhancedNewsAnalyzer()
+    report, title = analyzer.run()
+    
+    if report:
         if analyzer.server_chan_key:
             print("\n📤 正在发送到微信...")
             analyzer.send_to_wechat(report)
