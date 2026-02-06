@@ -15,6 +15,7 @@ from bs4 import BeautifulSoup
 import feedparser
 from urllib.parse import urljoin
 from collections import Counter
+from email_sender import send_daily_report_via_email
 
 class EnhancedNewsAnalyzer:
     def __init__(self):
@@ -624,13 +625,15 @@ class EnhancedNewsAnalyzer:
 
 ### 🚀 AI快讯摘要
 """
-            # 按类别分组展示AI新闻
+            # 按类别分组，但只纳入有翻译的文章
             ai_by_category = {}
             for article in self.ai_articles[:15]:
-                cat = article.get('category', 'other')
-                if cat not in ai_by_category:
-                    ai_by_category[cat] = []
-                ai_by_category[cat].append(article)
+                # 关键修改：只有存在 title_translated 才加入
+                if 'title_translated' in article:
+                    cat = article.get('category', 'other')
+                    if cat not in ai_by_category:
+                        ai_by_category[cat] = []
+                    ai_by_category[cat].append(article)
             
             category_names = {
                 'research': '🧪 研究前沿',
@@ -639,18 +642,24 @@ class EnhancedNewsAnalyzer:
                 'cn_ai': '🇨🇳 国内AI'
             }
             
+            has_any_translated = False
             for cat, articles in ai_by_category.items():
                 name = category_names.get(cat, '📌 其他')
-                report += f"\n**{name}**\n\n"
-                
-                for i, article in enumerate(articles, 1):
-                    # 只使用翻译标题（如果没有翻译则用原文，但优先翻译）
-                    title_display = article.get('title_translated', article['title'])
+                if articles:
+                    has_any_translated = True
+                    report += f"\n**{name}**\n\n"
                     
-                    # 构建两行格式
-                    report += f"{i}. {orig_title}\n"
-                    report += f"   {title_display}\n"
-                    report += f"   *{article['source']}* | [阅读原文]({article['link']})\n\n"
+                    for i, article in enumerate(articles, 1):
+                        # 现在只会有翻译标题
+                        title_display = article['title_translated']
+                        
+                        # 构建两行格式
+                        report += f"{i}. {orig_title}\n"
+                        report += f"{i}. **{title_display}**\n"
+                        report += f"   📍 {article['source']} | 🔗 [阅读原文]({article['link']})\n\n"
+            
+            if not has_any_translated:
+                report += "\n（暂无成功翻译的AI快讯）\n"
             
             # AI深度分析
             if self.deep_analyses:
@@ -775,7 +784,17 @@ class EnhancedNewsAnalyzer:
         
         # 6. 保存报告
         self.save_reports(report)
+        # 方式二：新增邮件发送功能
+        print("\n📧 正在通过邮件发送报告...")
+        email_success = send_daily_report_via_email(
+            report_content=report,
+            subject_prefix="AI科技与事实资讯日报"
+        )
         
+        if email_success:
+            print("✅ 邮件发送成功！")
+        else:
+        print("❌ 邮件发送失败，请检查邮件配置")
         print(f"\n📊 报告生成完成:")
         print(f"   AI资讯: {len(self.ai_articles)} 篇")
         print(f"   事实资讯: {len(self.fact_articles)} 篇")
