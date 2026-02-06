@@ -161,7 +161,7 @@ class EnhancedNewsAnalyzer:
                 
                 # 如果是英文，进行翻译以提供中英文对照
                 if article['lang'] == 'en' and self.zhipu_api_key:
-                    translated = self.translate_with_zhipu(title, summary)
+                    translated = self.translate_with_baidu(title, summary)
                     if translated:
                         article['title_translated'] = translated['title']
                         article['summary_translated'] = translated['summary']
@@ -237,7 +237,7 @@ class EnhancedNewsAnalyzer:
                     
                     # 翻译如果英文
                     if source.get('lang') == 'en' and self.zhipu_api_key:
-                        translated = self.translate_with_zhipu(title, '')
+                        translated = self.translate_with_baidu(title, '')
                         if translated:
                             article['title_translated'] = translated['title']
                     
@@ -251,53 +251,41 @@ class EnhancedNewsAnalyzer:
             print(f"⚠️ Hacker News抓取失败: {e}")
     
     # ==================== 新增：翻译功能 ====================
-    def translate_with_zhipu(self, title, summary):
-        """使用智谱AI翻译英文到中文，提供贴合实际的翻译"""
+    def translate_with_baidu(self, title, summary):
+        """使用百度翻译API翻译英文到中文"""
         try:
-            from zhipuai import ZhipuAI
+            from baidu_translator import translate_news
             
-            client = ZhipuAI(api_key=self.zhipu_api_key)
+            # 调用百度翻译
+            result = translate_news(title, summary)
             
-            prompt = f"""作为专业翻译，请将以下英文内容翻译成贴合实际、自然流畅的中文：
-标题：{title}
-摘要：{summary}
-
-请提供中英文对照：
-- 原标题：[original title]
-- 翻译标题：[translated title]
-- 原摘要：[original summary]
-- 翻译摘要：[translated summary]
-
-输出JSON格式：
-{{
-  "title": "translated title",
-  "summary": "translated summary"
-}}
-但在报告中可显示完整对照。
-"""
+            if not result or not result['translated']['title']:
+                logger.warning(f"翻译失败或返回空结果: {title[:50]}...")
+                return {
+                    'title': title,
+                    'summary': summary if summary else '',
+                    'translation_success': False
+                }
             
-            response = client.chat.completions.create(
-                model="glm-3-turbo",
-                messages=[
-                    {"role": "system", "content": "你是一个专业的英中翻译专家，翻译要准确、自然。"},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.2,
-                max_tokens=400
-            )
-            
-            result_text = response.choices[0].message.content
-            json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
-            
-            if json_match:
-                return json.loads(json_match.group())
-            else:
-                return None
+            return {
+                'title': result['translated']['title'],
+                'summary': result['translated']['summary'],
+                'original_title': result['original']['title'],
+                'original_summary': result['original']['summary'],
+                'translation_success': True,
+                'language': result.get('language', 'unknown'),
+                'note': result.get('note', '')
+            }
             
         except Exception as e:
-            print(f"⚠️ 翻译失败: {e}")
-            return None
-    
+            logger.error(f"百度翻译调用失败: {e}")
+            # 失败时返回原文
+            return {
+                'title': title,
+                'summary': summary if summary else '',
+                'translation_success': False,
+                'error': str(e)
+            }
     # ==================== 新增：抓取事实新闻 ====================
     def fetch_fact_news(self):
         """抓取多方面事实新闻"""
