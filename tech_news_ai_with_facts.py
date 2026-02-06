@@ -780,57 +780,38 @@ class EnhancedNewsAnalyzer:
             return False
     
         def run(self):
-        """主执行函数"""
-        print("=" * 70)
-        print("📊 增强版资讯分析系统启动")
-        print(f"📅 执行时间: {datetime.now()}")
-        print("=" * 70)
+            """主执行函数"""
+            print("=" * 70)
+            print("📊 增强版资讯分析系统启动")
+            print(f"📅 执行时间: {datetime.now()}")
+            print("=" * 70)
         
         # 1. 抓取AI新闻
-        self.fetch_all_news()
+            self.fetch_all_news()
         
         # 2. 抓取事实新闻（排序已移到 fetch_fact_news 內）
-        self.fetch_fact_news()
+            self.fetch_fact_news()
         
-        if not self.all_articles:
-            print("❌ 未抓取到任何文章，程序退出")
-            return None, "无内容"
-        
-        # 3. 生成AI深度分析
-        self.generate_deep_analyses(limit=3)
-        
-        # 4. 选择精选文章
-        self.select_featured_articles()
-        
-        # 5. 生成报告
-        report, title = self.generate_report()
-        
-        # 6. 保存报告
-        self.save_reports(report)
-        
-        print(f"\n📊 报告生成完成:")
-        print(f"   AI资讯: {len(self.ai_articles)} 篇")
-        print(f"   事实资讯: {len(self.fact_articles)} 篇")
-        print(f"   报告标题: {title}")
-        
-        return report, title
+            if not self.all_articles:
+                print("❌ 未抓取到任何文章，程序退出")
+                return None, "无内容"
         
         # 3. 生成AI深度分析
-        self.generate_deep_analyses(limit=3)
+            self.generate_deep_analyses(limit=3)
         
         # 4. 选择精选文章
-        self.select_featured_articles()
+            self.select_featured_articles()
         
         # 5. 生成报告
-        report, title = self.generate_report()
+            report, title = self.generate_report()
         
         # 6. 保存报告
-        self.save_reports(report)
+            self.save_reports(report)
         
-        print(f"\n📊 报告生成完成:")
-        print(f"   AI资讯: {len(self.ai_articles)} 篇")
-        print(f"   事实资讯: {len(self.fact_articles)} 篇")
-        print(f"   报告标题: {title}")
+            print(f"\n📊 报告生成完成:")
+            print(f"   AI资讯: {len(self.ai_articles)} 篇")
+            print(f"   事实资讯: {len(self.fact_articles)} 篇")
+            print(f"   报告标题: {title}")
         
         return report, title
 
