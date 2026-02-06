@@ -641,11 +641,17 @@ class EnhancedNewsAnalyzer:
             
             for cat, articles in ai_by_category.items():
                 name = category_names.get(cat, '📌 其他')
-                report += f"\n**{name}**\n"
-                for i, article in enumerate(articles[:3], 1):
+                report += f"\n**{name}**\n\n"
+                
+                for i, article in enumerate(articles, 1):
+                    # 优先使用翻译标题，如果没有则用原文
                     title_display = article.get('title_translated', article['title'])
-                    report += f"{i}. {title_display}\n"
-                    report += f"   📍 {article['source']} | 🔗 [阅读原文]({article['link']})\n"
+                    orig_title = article['title'] if 'title_translated' in article else title_display
+                    
+                    # 构建两行格式
+                    report += f"{i}. {orig_title}\n"
+                    report += f"   {title_display}\n"
+                    report += f"   *{article['source']}* | [阅读原文]({article['link']})\n\n"
             
             # AI深度分析
             if self.deep_analyses:
