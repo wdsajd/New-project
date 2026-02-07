@@ -16,11 +16,13 @@ import feedparser
 from urllib.parse import urljoin
 from collections import Counter
 import random  # 用于生成 salt
+import google.generativeai as genai
+from bs4 import BeautifulSoup
 
 class EnhancedNewsAnalyzer:
     def __init__(self):
         self.server_chan_key = os.getenv('SERVER_CHAN_KEY')
-        self.zhipu_api_key = os.getenv('ZHIPU_API_KEY')
+        self.gemini_api_key = os.getenv('GEMINI_API_KEY')
         self.forty_eight_hours_ago = datetime.now() - timedelta(hours=48)
         
         # AI科技新闻源（保持不变）
@@ -348,98 +350,87 @@ class EnhancedNewsAnalyzer:
         
         print(f"✅ AI新闻抓取完成！共获得 {len(self.ai_articles)} 篇")
     
-    def analyze_with_zhipu(self, article):
-        """使用智谱AI分析文章"""
+
+
+    def fetch_arxiv_abstract(url):
         try:
-            from zhipuai import ZhipuAI
-            
-            client = ZhipuAI(api_key=self.zhipu_api_key)
-            
-            prompt = f"""作为新闻分析师，请分析以下文章：
-
-标题：{article['title']}
-来源：{article['source']}
-摘要：{article.get('summary', '暂无详细摘要')}
-
-请提供以下分析：
-1. 核心内容要点
-2. 新闻重要性（高/中/低）
-3. 影响范围（国际/国内/区域/行业）
-4. 值得关注的理由
-5. 内容标签（3-5个关键词）
-
-请用JSON格式回复，包含以下字段：
-- key_points: 列表，核心内容要点
-- importance_level: 字符串，高/中/低
-- impact_scope: 字符串
-- attention_reason: 字符串
-- content_tags: 列表，内容标签
-"""
-            
-            response = client.chat.completions.create(
-                model="glm-3-turbo",  # 使用性价比更高的模型
-                messages=[
-                    {"role": "system", "content": "你是一个专业的新闻分析师。"},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3,
-                max_tokens=600
-            )
-            
-            result_text = response.choices[0].message.content
-            json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
-            
-            if json_match:
-                analysis_result = json.loads(json_match.group())
-            else:
-                analysis_result = {
-                    "key_points": ["重要新闻"],
-                    "importance_level": "中",
-                    "impact_scope": "广泛关注",
-                    "attention_reason": "值得关注的新闻报道",
-                    "content_tags": ["新闻"]
-                }
-            
-            return {
-                'content_tags': analysis_result.get('content_tags', ['新闻']),
-                'importance_level': analysis_result.get('importance_level', '中'),
-                'impact_scope': analysis_result.get('impact_scope', '广泛'),
-                'attention_reason': analysis_result.get('attention_reason', '值得关注'),
-                'key_points': analysis_result.get('key_points', []),
-                'source': 'zhipu_ai'
-            }
-            
-        except Exception as e:
-            print(f"⚠️ 智谱AI分析失败: {e}")
+            response = requests.get(url, timeout=10)
+            soup = BeautifulSoup(response.text, 'html.parser')
+            abstract = soup.find('blockquote', class_='abstract').text.strip() if soup.find('blockquote', class_='abstract') else ""
+            return abstract
+        except:
+            return ""
+    
+    def analyze_with_gemini(self, article):
+        api_key = os.getenv('GEMINI_API_KEY')
+        if not api_key:
+            print("⚠️ 未配置 GEMINI_API_KEY，跳过分析")
             return self._fallback_analysis(article)
     
-    def _fallback_analysis(self, article):
-        """备用关键词分析"""
-        text = f"{article['title']} {article.get('summary', '')}".lower()
-        
-        # 根据内容判断类别
-        tags = []
-        if any(word in text for word in ['politics', 'government', 'policy', '政治', '政府']):
-            tags.append('政治')
-        if any(word in text for word in ['economy', 'financial', 'market', '经济', '金融']):
-            tags.append('经济')
-        if any(word in text for word in ['technology', 'tech', 'digital', '科技', '技术']):
-            tags.append('科技')
-        if any(word in text for word in ['health', 'medical', '疫情', '疫苗', '健康']):
-            tags.append('健康')
-        if any(word in text for word in ['environment', 'climate', '环保', '气候']):
-            tags.append('环境')
-        if not tags:
-            tags = ['综合新闻']
-        
-        return {
-            'content_tags': tags,
-            'importance_level': '中',
-            'impact_scope': '广泛关注',
-            'attention_reason': '值得关注的新闻报道',
-            'key_points': tags,
-            'source': 'keyword_analysis'
-        }
+        try:
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel('gemini-1.5-flash')
+    
+            # 如果是ArXiv，获取真实摘要
+            full_abstract = ""
+            if 'arxiv.org' in article['link']:
+                full_abstract = fetch_arxiv_abstract(article['link'])
+    
+            prompt = f"""作为专业AI论文分析师，请分析以下论文：
+    
+    标题：{article['title']}
+    来源：{article['source']}
+    摘要：{full_abstract or article.get('summary', '暂无摘要')}
+    
+    请严格输出JSON：
+    {{
+      "content_summary": "150-250字中文摘要，提炼核心贡献、方法、结果",
+      "content_tags": ["标签1", "标签2", ...],  // 8-12个标准化关键词，覆盖方法/技术/应用/基准
+      "importance_level": "高/中/低",
+      "impact_scope": "多方面影响描述",
+      "attention_reason": "结合创新、结果、局限的多角度理由"
+    }}
+    
+    直接返回JSON，无多余文字。
+    """
+    
+            response = model.generate_content(prompt)
+            text = response.text.strip()
+            json_match = re.search(r'\{.*\}', text, re.DOTALL)
+            if json_match:
+                return json.loads(json_match.group(0))
+            else:
+                return self._fallback_analysis(article)
+        except Exception as e:
+            print(f"⚠️ Gemini分析失败: {e}")
+            return self._fallback_analysis(article)
+        def _fallback_analysis(self, article):
+            """备用关键词分析"""
+            text = f"{article['title']} {article.get('summary', '')}".lower()
+            
+            # 根据内容判断类别
+            tags = []
+            if any(word in text for word in ['politics', 'government', 'policy', '政治', '政府']):
+                tags.append('政治')
+            if any(word in text for word in ['economy', 'financial', 'market', '经济', '金融']):
+                tags.append('经济')
+            if any(word in text for word in ['technology', 'tech', 'digital', '科技', '技术']):
+                tags.append('科技')
+            if any(word in text for word in ['health', 'medical', '疫情', '疫苗', '健康']):
+                tags.append('健康')
+            if any(word in text for word in ['environment', 'climate', '环保', '气候']):
+                tags.append('环境')
+            if not tags:
+                tags = ['综合新闻']
+            
+            return {
+                'content_tags': tags,
+                'importance_level': '中',
+                'impact_scope': '广泛关注',
+                'attention_reason': '值得关注的新闻报道',
+                'key_points': tags,
+                'source': 'keyword_analysis'
+            }
     
     def generate_deep_analyses(self, limit=3):
         """生成深度分析（AI新闻）"""
@@ -457,7 +448,7 @@ class EnhancedNewsAnalyzer:
         analyses = []
         for i, article in enumerate(important_articles, 1):
             print(f"  {i}. 分析: {article['title'][:60]}...")
-            analysis = self.analyze_with_zhipu(article)
+            analysis = self.analyze_with_gemini(article)
             
             # 如果有翻译，使用翻译
             title_display = article.get('title_translated', article['title'])
