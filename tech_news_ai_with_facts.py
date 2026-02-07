@@ -464,7 +464,7 @@ class EnhancedNewsAnalyzer:
             analysis_text = f"""## 📊 {title_display}
 
 **来源**: {article['source']} | **时间**: {article.get('time', 'N/A')}
-**AI分析模型**: 🤖 智谱GLM
+**AI分析模型**: 🤖 Gemini
 
 **🔗 原文链接**: {article['link']}
 
