@@ -23,7 +23,8 @@ jobs:
         python -m pip install --upgrade pip
         pip install requests beautifulsoup4 feedparser lxml zhipuai
         pip install requests beautifulsoup4 feedparser lxml zhipuai sniffio
-    
+        pip install google-generativeai
+
     - name: Run AI News Analyzer
       env:
         SERVER_CHAN_KEY: ${{ secrets.SERVER_CHAN_KEY }}
