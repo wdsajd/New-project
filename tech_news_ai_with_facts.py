@@ -490,7 +490,7 @@ class EnhancedNewsAnalyzer:
                 'text': analysis_text
             })
             
-            if self.zhipu_api_key:
+            if self.gemini_api_key:
                 time.sleep(1)  # API调用间隔
         
         self.deep_analyses = analyses
