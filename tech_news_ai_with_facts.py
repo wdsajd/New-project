@@ -352,13 +352,19 @@ class EnhancedNewsAnalyzer:
     
 
 
-    def fetch_arxiv_abstract(url):
+    def fetch_arxiv_abstract(self, url):
         try:
-            response = requests.get(url, timeout=10)
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()
+            
             soup = BeautifulSoup(response.text, 'html.parser')
-            abstract = soup.find('blockquote', class_='abstract').text.strip() if soup.find('blockquote', class_='abstract') else ""
-            return abstract
-        except:
+            abstract_tag = soup.find('blockquote', class_='abstract')
+            if abstract_tag:
+                return abstract_tag.text.strip()
+            return ""
+        except Exception as e:
+            print(f"抓取 arXiv 摘要失败 {url}: {e}")
             return ""
     
     def analyze_with_gemini(self, article):
@@ -404,11 +410,11 @@ class EnhancedNewsAnalyzer:
         except Exception as e:
             print(f"⚠️ Gemini分析失败: {e}")
             return self._fallback_analysis(article)
-        def _fallback_analysis(self, article):
-            """备用关键词分析"""
+        
+    def _fallback_analysis(self, article):
+            """备用关键词分析，当 Gemini 失败时使用"""
             text = f"{article['title']} {article.get('summary', '')}".lower()
             
-            # 根据内容判断类别
             tags = []
             if any(word in text for word in ['politics', 'government', 'policy', '政治', '政府']):
                 tags.append('政治')
@@ -420,16 +426,18 @@ class EnhancedNewsAnalyzer:
                 tags.append('健康')
             if any(word in text for word in ['environment', 'climate', '环保', '气候']):
                 tags.append('环境')
+            if any(word in text for word in ['ai', 'llm', 'gpt', 'transformer', '人工智能', '大模型']):
+                tags.append('AI相关')
             if not tags:
                 tags = ['综合新闻']
             
             return {
+                'content_summary': "暂无详细摘要",
                 'content_tags': tags,
                 'importance_level': '中',
                 'impact_scope': '广泛关注',
                 'attention_reason': '值得关注的新闻报道',
-                'key_points': tags,
-                'source': 'keyword_analysis'
+                'key_points': tags
             }
     
     def generate_deep_analyses(self, limit=3):
