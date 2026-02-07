@@ -15,6 +15,7 @@ from bs4 import BeautifulSoup
 import feedparser
 from urllib.parse import urljoin
 from collections import Counter
+import random  # 用于生成 salt
 
 class EnhancedNewsAnalyzer:
     def __init__(self):
@@ -59,6 +60,51 @@ class EnhancedNewsAnalyzer:
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
     
+    # ==================== 新增：百度翻译函数 ====================
+    def baidu_translate(self, title, summary):
+        """使用百度API翻译英文到中文，提供贴合实际的翻译"""
+        appid = os.getenv('BAIDU_APPID')
+        secret_key = os.getenv('BAIDU_SECRET_KEY')
+        if not appid or not secret_key:
+            print("⚠️ 未配置百度翻译密钥，跳过翻译")
+            return None
+        
+        try:
+            query = title + '\n' + summary if summary else title
+            from_lang = 'en'
+            to_lang = 'zh'
+            salt = str(random.randint(32768, 65536))
+            sign = hashlib.md5((appid + query + salt + secret_key).encode('utf-8')).hexdigest()
+            
+            url = 'http://api.fanyi.baidu.com/api/trans/vip/translate'
+            params = {
+                'q': query,
+                'from': from_lang,
+                'to': to_lang,
+                'appid': appid,
+                'salt': salt,
+                'sign': sign
+            }
+            
+            response = requests.get(url, params=params, timeout=10)
+            result = response.json()
+            
+            if 'trans_result' in result:
+                trans_result = result['trans_result'][0]['dst']
+                parts = trans_result.split('\n')
+                translated_title = parts[0].strip()
+                translated_summary = parts[1].strip() if len(parts) > 1 else ''
+                return {
+                    'title': translated_title,
+                    'summary': translated_summary
+                }
+            else:
+                print(f"⚠️ 百度翻译失败: {result.get('error_msg', '未知错误')}")
+                return None
+        except Exception as e:
+            print(f"⚠️ 百度翻译请求失败: {e}")
+            return None
+    
     # ==================== 原有AI新闻抓取方法（保持不变） ====================
     def fetch_arxiv(self, source):
         """抓取Arxiv AI论文"""
@@ -94,8 +140,14 @@ class EnhancedNewsAnalyzer:
                             'category': 'research',
                             'importance': 9,
                             'time': datetime.now().strftime('%Y-%m-%d'),
-                            'type': 'ai'
+                            'type': 'ai',
+                            'lang': 'en'  # 添加 lang 以支持翻译
                         }
+                        # 添加翻译
+                        translated = self.baidu_translate(article['title'], article['summary'])
+                        if translated:
+                            article['title_translated'] = translated['title']
+                            article['summary_translated'] = translated['summary']
                         self.all_articles.append(article)
                         self.ai_articles.append(article)
         except Exception as e:
@@ -156,12 +208,9 @@ class EnhancedNewsAnalyzer:
                     'type': article_type
                 }
                 
-                # 添加 priority
-                article['priority'] = source.get('priority', 5)
-                
                 # 如果是英文，进行翻译以提供中英文对照
-                if article['lang'] == 'en' and self.zhipu_api_key:
-                    translated = self.translate_with_baidu(title, summary)
+                if article['lang'] == 'en':
+                    translated = self.baidu_translate(title, summary)
                     if translated:
                         article['title_translated'] = translated['title']
                         article['summary_translated'] = translated['summary']
@@ -229,15 +278,13 @@ class EnhancedNewsAnalyzer:
                         'category': source.get('category', 'tech'),
                         'importance': min(9, 6 + (hit.get('points', 0) // 20)),
                         'time': datetime.fromtimestamp(hit.get('created_at_i', 0)).strftime('%Y-%m-%d %H:%M'),
-                        'type': article_type
+                        'type': article_type,
+                        'lang': source.get('lang', 'en')
                     }
                     
-                    # 添加 priority
-                    article['priority'] = source.get('priority', 5)
-                    
                     # 翻译如果英文
-                    if source.get('lang') == 'en' and self.zhipu_api_key:
-                        translated = self.translate_with_baidu(title, '')
+                    if article['lang'] == 'en':
+                        translated = self.baidu_translate(title, '')
                         if translated:
                             article['title_translated'] = translated['title']
                     
@@ -250,42 +297,6 @@ class EnhancedNewsAnalyzer:
         except Exception as e:
             print(f"⚠️ Hacker News抓取失败: {e}")
     
-    # ==================== 新增：翻译功能 ====================
-    def translate_with_baidu(self, title, summary):
-        """使用百度翻译API翻译英文到中文"""
-        try:
-            from baidu_translator import translate_news
-            
-            # 调用百度翻译
-            result = translate_news(title, summary)
-            
-            if not result or not result['translated']['title']:
-                logger.warning(f"翻译失败或返回空结果: {title[:50]}...")
-                return {
-                    'title': title,
-                    'summary': summary if summary else '',
-                    'translation_success': False
-                }
-            
-            return {
-                'title': result['translated']['title'],
-                'summary': result['translated']['summary'],
-                'original_title': result['original']['title'],
-                'original_summary': result['original']['summary'],
-                'translation_success': True,
-                'language': result.get('language', 'unknown'),
-                'note': result.get('note', '')
-            }
-            
-        except Exception as e:
-            logger.error(f"百度翻译调用失败: {e}")
-            # 失败时返回原文
-            return {
-                'title': title,
-                'summary': summary if summary else '',
-                'translation_success': False,
-                'error': str(e)
-            }
     # ==================== 新增：抓取事实新闻 ====================
     def fetch_fact_news(self):
         """抓取多方面事实新闻"""
@@ -516,7 +527,7 @@ class EnhancedNewsAnalyzer:
                 self.featured_fact = scored_facts[0]
     
     def format_fact_news_section(self):
-        """格式化事实新闻部分，分组显示国内 + 国际"""
+        """格式化事实新闻部分，提供中英文对照如果可用"""
         if not self.fact_articles:
             return ""
         
@@ -629,17 +640,11 @@ class EnhancedNewsAnalyzer:
             
             for cat, articles in ai_by_category.items():
                 name = category_names.get(cat, '📌 其他')
-                report += f"\n**{name}**\n\n"
-                
-                for i, article in enumerate(articles, 1):
-                    # 只使用翻译标题（如果没有翻译则用原文，但优先翻译）
+                report += f"\n**{name}**\n"
+                for i, article in enumerate(articles[:3], 1):
                     title_display = article.get('title_translated', article['title'])
-                    orig_title = article['title']  # 定义原文标题（如果有翻译，则用原文；否则用 title_display）
-                    
-                    # 构建两行格式
-                    report += f"{i}. {orig_title}\n"
-                    report += f"   {title_display}\n"
-                    report += f"   *{article['source']}* | [阅读原文]({article['link']})\n\n"
+                    report += f"{i}. {title_display}\n"
+                    report += f"   📍 {article['source']} | 🔗 [阅读原文]({article['link']})\n"
             
             # AI深度分析
             if self.deep_analyses:
@@ -715,7 +720,7 @@ class EnhancedNewsAnalyzer:
         url = f"https://sctapi.ftqq.com/{self.server_chan_key}.send"
         
         if len(report) > 6000:
-            report = report[:6000] + "\n\n...（报告过长，已截断，完整内容请查看保存的文件）"
+            report = report[:6000] + "\n\n...（报告过长，已截断）"
         
         data = {
             'title': f"资讯双报告 {datetime.now().strftime('%m-%d')} | AI:{len(self.ai_articles)} 事实:{len(self.fact_articles)}",
@@ -735,7 +740,7 @@ class EnhancedNewsAnalyzer:
         except Exception as e:
             print(f"❌ 推送请求失败: {e}")
             return False
-
+    
     def run(self):
         """主执行函数"""
         print("=" * 70)
