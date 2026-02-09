@@ -7,8 +7,6 @@ AI科技资讯与事实资讯智能分析系统
 import os
 import re
 import json
-import asyncio
-import aiohttp
 import requests
 import hashlib
 from datetime import datetime, timedelta
@@ -20,6 +18,20 @@ from collections import Counter
 import random  # 用于生成 salt
 import google.generativeai as genai
 from bs4 import BeautifulSoup
+
+# 条件导入异步库（提供友好的错误提示）
+try:
+    import asyncio
+    import aiohttp
+    ASYNC_AVAILABLE = True
+except ImportError as e:
+    print("⚠️  警告: 未安装异步库，异步功能将不可用")
+    print(f"   缺失模块: {e.name}")
+    print("   安装命令: pip install aiohttp")
+    ASYNC_AVAILABLE = False
+    # 创建占位符避免后续代码报错
+    asyncio = None
+    aiohttp = None
 
 class EnhancedNewsAnalyzer:
     def __init__(self):
@@ -190,6 +202,9 @@ class EnhancedNewsAnalyzer:
     
     async def fetch_rss_async(self, session, source, article_type='ai'):
         """异步RSS抓取方法"""
+        if not ASYNC_AVAILABLE:
+            raise RuntimeError("异步功能不可用：请先安装 aiohttp (pip install aiohttp)")
+        
         try:
             async with session.get(source['url'], timeout=aiohttp.ClientTimeout(total=15)) as response:
                 if response.status == 200:
@@ -277,6 +292,9 @@ class EnhancedNewsAnalyzer:
     
     async def fetch_hackernews_async(self, session, source, article_type='ai'):
         """异步Hacker News抓取方法"""
+        if not ASYNC_AVAILABLE:
+            raise RuntimeError("异步功能不可用：请先安装 aiohttp (pip install aiohttp)")
+        
         try:
             timestamp = int(self.forty_eight_hours_ago.timestamp())
             query_param = source['url'].format(timestamp)
@@ -1022,6 +1040,9 @@ class EnhancedNewsAnalyzer:
     
     async def run_async(self):
         """异步主执行函数（带异常处理）"""
+        if not ASYNC_AVAILABLE:
+            raise RuntimeError("异步功能不可用：请先安装 aiohttp (pip install aiohttp)")
+        
         print("=" * 70)
         print("📊 增强版资讯分析系统启动 (异步模式)")
         print(f"📅 执行时间: {datetime.now()}")
@@ -1173,6 +1194,12 @@ def main():
     
     if args.use_async:
         # 异步模式
+        if not ASYNC_AVAILABLE:
+            print("❌ 异步模式不可用：请先安装 aiohttp")
+            print("   安装命令: pip install aiohttp")
+            print("   或使用同步模式: python tech_news_ai_with_facts.py")
+            return
+        
         print("🚀 启动异步模式...")
         report, title = asyncio.run(analyzer.run_async())
     else:
