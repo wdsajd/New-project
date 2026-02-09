@@ -25,6 +25,25 @@ class EnhancedNewsAnalyzer:
         self.gemini_api_key = os.getenv('GEMINI_API_KEY')
         self.forty_eight_hours_ago = datetime.now() - timedelta(hours=48)
         
+        # 摘要缓存字典（避免重复请求同一篇论文）
+        self.abstract_cache = {}
+        
+        # 防御性检查：API密钥配置提醒
+        if not self.gemini_api_key:
+            print("⚠️  警告: 未配置 GEMINI_API_KEY 环境变量")
+            print("   → 深度分析将使用备用关键词分析（功能受限）")
+            print("   → 建议配置 Gemini API 以获得完整分析能力\n")
+        
+        if not self.server_chan_key:
+            print("⚠️  警告: 未配置 SERVER_CHAN_KEY 环境变量")
+            print("   → 微信推送功能将被禁用\n")
+        
+        baidu_appid = os.getenv('BAIDU_APPID')
+        baidu_secret_key = os.getenv('BAIDU_SECRET_KEY')
+        if not baidu_appid or not baidu_secret_key:
+            print("⚠️  警告: 未配置百度翻译 API（BAIDU_APPID/BAIDU_SECRET_KEY）")
+            print("   → 英文内容将不会被翻译为中文\n")
+        
         # AI科技新闻源（保持不变）
         self.ai_news_sources = [
             {'name': 'Arxiv AI Papers', 'url': 'http://arxiv.org/list/cs.AI/recent', 'type': 'arxiv', 'category': 'ai_research'},
@@ -353,7 +372,12 @@ class EnhancedNewsAnalyzer:
 
 
     def fetch_arxiv_abstract(self, url):
-        """从 arXiv 论文详情页提取完整摘要"""
+        """从 arXiv 论文详情页提取完整摘要（带缓存机制）"""
+        # 检查缓存，避免重复请求
+        if url in self.abstract_cache:
+            print(f"  ✓ 使用缓存的摘要: {url}")
+            return self.abstract_cache[url]
+        
         try:
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -364,29 +388,33 @@ class EnhancedNewsAnalyzer:
             soup = BeautifulSoup(response.text, 'html.parser')
             abstract_tag = soup.find('blockquote', class_='abstract')
             if abstract_tag:
-                return abstract_tag.text.strip()
+                abstract_text = abstract_tag.text.strip()
+                # 存入缓存
+                self.abstract_cache[url] = abstract_text
+                return abstract_text
             else:
-                print(f"未找到摘要标签: {url}")
+                print(f"  ⚠️  未找到摘要标签: {url}")
+                self.abstract_cache[url] = ""
                 return ""
         except Exception as e:
-            print(f"抓取 arXiv 摘要失败 {url}: {e}")
+            print(f"  ❌ 抓取 arXiv 摘要失败 {url}: {e}")
+            self.abstract_cache[url] = ""
             return ""
-    
+
     def analyze_with_gemini(self, article):
         api_key = os.getenv('GEMINI_API_KEY')
         if not api_key:
-            print("⚠️ 未配置 GEMINI_API_KEY，跳过分析")
+            print("  ⚠️  未配置 GEMINI_API_KEY，使用备用分析")
             return self._fallback_analysis(article)
     
         try:
             genai.configure(api_key=api_key)
             model = genai.GenerativeModel('gemini-1.5-flash')
     
-            # 如果是ArXiv，获取真实摘要
-            full_abstract = self.fetch_arxiv_abstract(article['link'])
-            prompt = f"基于论文标题：{article['title']}，摘要：{full_abstract or article.get('summary', '暂无')}，生成深度分析..."
+            # 如果是ArXiv，获取真实摘要（已带缓存）
+            full_abstract = ""
             if 'arxiv.org' in article['link']:
-                full_abstract = fetch_arxiv_abstract(article['link'])
+                full_abstract = self.fetch_arxiv_abstract(article['link'])
     
             prompt = f"""作为专业AI论文分析师，请分析以下论文：
     
@@ -397,10 +425,11 @@ class EnhancedNewsAnalyzer:
     请严格输出JSON：
     {{
       "content_summary": "150-250字中文摘要，提炼核心贡献、方法、结果",
-      "content_tags": ["标签1", "标签2", ...],  // 8-12个标准化关键词，覆盖方法/技术/应用/基准
+      "content_tags": ["标签1", "标签2", ...],
       "importance_level": "高/中/低",
       "impact_scope": "多方面影响描述",
-      "attention_reason": "结合创新、结果、局限的多角度理由"
+      "attention_reason": "结合创新、结果、局限的多角度理由",
+      "key_points": ["要点1", "要点2", "要点3"]
     }}
     
     直接返回JSON，无多余文字。
@@ -410,11 +439,34 @@ class EnhancedNewsAnalyzer:
             text = response.text.strip()
             json_match = re.search(r'\{.*\}', text, re.DOTALL)
             if json_match:
-                return json.loads(json_match.group(0))
+                analysis_result = json.loads(json_match.group(0))
+                # 确保 key_points 存在
+                if 'key_points' not in analysis_result:
+                    analysis_result['key_points'] = analysis_result.get('content_tags', [])[:3]
+                return analysis_result
             else:
+                print(f"  ⚠️  Gemini返回格式异常，无法解析JSON，使用备用分析")
                 return self._fallback_analysis(article)
+        except json.JSONDecodeError as e:
+            print(f"  ❌ Gemini分析JSON解析失败:")
+            print(f"     错误类型: {type(e).__name__}")
+            print(f"     错误信息: {str(e)}")
+            print(f"     文章标题: {article.get('title', 'N/A')[:80]}")
+            return self._fallback_analysis(article)
+        except requests.exceptions.RequestException as e:
+            print(f"  ❌ Gemini API网络请求失败:")
+            print(f"     错误类型: {type(e).__name__}")
+            print(f"     错误信息: {str(e)}")
+            print(f"     文章标题: {article.get('title', 'N/A')[:80]}")
+            return self._fallback_analysis(article)
         except Exception as e:
-            print(f"⚠️ Gemini分析失败: {e}")
+            print(f"  ❌ Gemini分析发生未预期错误:")
+            print(f"     错误类型: {type(e).__name__}")
+            print(f"     错误信息: {str(e)}")
+            print(f"     文章链接: {article.get('link', 'N/A')}")
+            print(f"     文章标题: {article.get('title', 'N/A')[:80]}")
+            import traceback
+            print(f"     堆栈跟踪:\n{traceback.format_exc()}")
             return self._fallback_analysis(article)
         
     def _fallback_analysis(self, article):
