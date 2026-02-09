@@ -21,9 +21,16 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install requests beautifulsoup4 feedparser lxml zhipuai
-        pip install requests beautifulsoup4 feedparser lxml zhipuai sniffio
+        # 基础依赖
+        pip install requests beautifulsoup4 feedparser lxml
+        # AI相关依赖
         pip install google-generativeai
+        # 异步支持依赖
+        pip install aiohttp
+        # 其他可能需要的依赖
+        pip install sniffio
+        # 验证安装
+        python -c "import requests, bs4, feedparser, google.generativeai, aiohttp; print('✅ 所有依赖安装成功')"
 
     - name: Run AI News Analyzer
       env:
