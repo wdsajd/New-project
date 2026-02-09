@@ -7,6 +7,8 @@ AI科技资讯与事实资讯智能分析系统
 import os
 import re
 import json
+import asyncio
+import aiohttp
 import requests
 import hashlib
 from datetime import datetime, timedelta
@@ -83,12 +85,16 @@ class EnhancedNewsAnalyzer:
     
     # ==================== 新增：百度翻译函数 ====================
     def baidu_translate(self, title, summary):
-        """使用百度API翻译英文到中文，提供贴合实际的翻译"""
+        """使用百度API翻译英文到中文，提供贴合实际的翻译，失败时返回标记"""
         appid = os.getenv('BAIDU_APPID')
         secret_key = os.getenv('BAIDU_SECRET_KEY')
         if not appid or not secret_key:
             print("⚠️ 未配置百度翻译密钥，跳过翻译")
-            return None
+            # 返回特殊标记表示未翻译
+            return {
+                'title': f"{title} (未翻译)",
+                'summary': f"{summary} (未翻译)" if summary else "(未翻译)"
+            }
         
         try:
             query = title + '\n' + summary if summary else title
@@ -121,10 +127,18 @@ class EnhancedNewsAnalyzer:
                 }
             else:
                 print(f"⚠️ 百度翻译失败: {result.get('error_msg', '未知错误')}")
-                return None
+                # 翻译失败也返回标记
+                return {
+                    'title': f"{title} (未翻译)",
+                    'summary': f"{summary} (未翻译)" if summary else "(未翻译)"
+                }
         except Exception as e:
             print(f"⚠️ 百度翻译请求失败: {e}")
-            return None
+            # 异常情况下也返回标记
+            return {
+                'title': f"{title} (未翻译)",
+                'summary': f"{summary} (未翻译)" if summary else "(未翻译)"
+            }
     
     # ==================== 原有AI新闻抓取方法（保持不变） ====================
     def fetch_arxiv(self, source):
@@ -166,15 +180,163 @@ class EnhancedNewsAnalyzer:
                         }
                         # 添加翻译
                         translated = self.baidu_translate(article['title'], article['summary'])
-                        if translated:
-                            article['title_translated'] = translated['title']
-                            article['summary_translated'] = translated['summary']
+                        # translated 现在总是返回字典，包含原始内容+标记
+                        article['title_translated'] = translated['title']
+                        article['summary_translated'] = translated['summary']
                         self.all_articles.append(article)
                         self.ai_articles.append(article)
         except Exception as e:
             print(f"⚠️ Arxiv抓取失败: {e}")
     
-    def fetch_rss(self, source, article_type='ai'):
+    async def fetch_rss_async(self, session, source, article_type='ai'):
+        """异步RSS抓取方法"""
+        try:
+            async with session.get(source['url'], timeout=aiohttp.ClientTimeout(total=15)) as response:
+                if response.status == 200:
+                    text = await response.text()
+                    feed = feedparser.parse(text)
+                    articles_added = 0
+                    seen_links = set()
+                    
+                    for entry in feed.entries[:20]:
+                        if articles_added >= 5:
+                            break
+                        
+                        # 检查发布时间
+                        pub_time = None
+                        if hasattr(entry, 'published_parsed'):
+                            pub_time = datetime(*entry.published_parsed[:6])
+                        elif hasattr(entry, 'updated_parsed'):
+                            pub_time = datetime(*entry.updated_parsed[:6])
+                        
+                        if not pub_time:
+                            pub_time = datetime.now()
+                            article_importance = 4
+                        
+                        if pub_time < self.forty_eight_hours_ago:
+                            continue
+                        
+                        title = entry.get('title', '').strip()
+                        summary = entry.get('summary', '').strip()
+                        link = entry.get('link', '').strip()
+                        
+                        link_hash = hashlib.md5(link.encode()).hexdigest()
+                        if link_hash in seen_links:
+                            continue
+                        seen_links.add(link_hash)
+                        
+                        if summary:
+                            soup = BeautifulSoup(summary, 'html.parser')
+                            summary = soup.get_text()[:250]
+                        
+                        article = {
+                            'id': link_hash[:8],
+                            'title': title[:150],
+                            'link': link,
+                            'source': source['name'],
+                            'summary': summary[:250] + '...' if len(summary) > 250 else summary,
+                            'category': source.get('category', 'general'),
+                            'lang': source.get('lang', 'en'),
+                            'importance': 6,
+                            'time': pub_time.strftime('%Y-%m-%d %H:%M'),
+                            'type': article_type
+                        }
+                        
+                        if article['lang'] == 'en':
+                            translated = self.baidu_translate(title, summary)
+                            article['title_translated'] = translated['title']
+                            article['summary_translated'] = translated['summary']
+                        
+                        if article_type == 'ai':
+                            content = f"{title} {summary}".lower()
+                            ai_keywords = ['ai', 'artificial intelligence', 'machine learning', 
+                                      'deep learning', 'neural network', 'llm', 'gpt', 'transformer',
+                                      '人工智能', '机器学习', '深度学习', '大模型', '生成式AI', '计算机视觉', '图像生成','训练',
+                                      'AIGC', 'Diffusion模型', 'MoE模型', 'RLHF']
+                            
+                            is_ai_related = any(keyword in content for keyword in ai_keywords)
+                            if is_ai_related:
+                                article['importance'] = 8
+                                self.all_articles.append(article)
+                                self.ai_articles.append(article)
+                                articles_added += 1
+                        else:
+                            if link_hash not in [a['id'] for a in self.fact_articles]:
+                                self.all_articles.append(article)
+                                self.fact_articles.append(article)
+                                articles_added += 1
+                    
+                    print(f"  ✓ {source['name']} 抓取完成 ({articles_added}篇)")
+                    return articles_added
+                else:
+                    print(f"  ❌ {source['name']} HTTP {response.status}")
+                    return 0
+        except Exception as e:
+            print(f"  ❌ {source['name']} 抓取出错: {e}")
+            return 0
+    
+    async def fetch_hackernews_async(self, session, source, article_type='ai'):
+        """异步Hacker News抓取方法"""
+        try:
+            timestamp = int(self.forty_eight_hours_ago.timestamp())
+            query_param = source['url'].format(timestamp)
+            url = query_param
+            
+            if article_type == 'fact' and 'query=AI' in url:
+                url = url.replace('&query=AI', '')
+            
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    hits = data.get('hits', [])
+                    seen_links = set()
+                    count = 0
+                    
+                    for hit in hits[:10]:
+                        link = hit.get('url', f"https://news.ycombinator.com/item?id={hit.get('objectID')}")
+                        link_hash = hashlib.md5(link.encode()).hexdigest()
+                        if link_hash in seen_links:
+                            continue
+                        seen_links.add(link_hash)
+                        
+                        title = hit.get('title', '')
+                        
+                        if article_type == 'ai' and not any(keyword in title.lower() for keyword in ['ai', 'llm', 'gpt', 'openai', 'anthropic']):
+                            continue
+                        
+                        article = {
+                            'id': f"hn_{hit.get('objectID', '')}",
+                            'title': title,
+                            'link': link,
+                            'source': source['name'],
+                            'points': hit.get('points', 0),
+                            'comments': hit.get('num_comments', 0),
+                            'category': source.get('category', 'tech'),
+                            'importance': min(9, 6 + (hit.get('points', 0) // 20)),
+                            'time': datetime.fromtimestamp(hit.get('created_at_i', 0)).strftime('%Y-%m-%d %H:%M'),
+                            'type': article_type,
+                            'lang': source.get('lang', 'en')
+                        }
+                        
+                        if article['lang'] == 'en':
+                            translated = self.baidu_translate(title, '')
+                            article['title_translated'] = translated['title']
+                        
+                        self.all_articles.append(article)
+                        if article_type == 'ai':
+                            self.ai_articles.append(article)
+                        else:
+                            self.fact_articles.append(article)
+                        count += 1
+                    
+                    print(f"  ✓ {source['name']} 抓取完成 ({count}篇)")
+                    return count
+                else:
+                    print(f"  ❌ {source['name']} HTTP {response.status}")
+                    return 0
+        except Exception as e:
+            print(f"  ❌ {source['name']} 抓取出错: {e}")
+            return 0
         """通用RSS抓取方法，增强去重和时效性"""
         try:
             feed = feedparser.parse(source['url'])
@@ -232,9 +394,9 @@ class EnhancedNewsAnalyzer:
                 # 如果是英文，进行翻译以提供中英文对照
                 if article['lang'] == 'en':
                     translated = self.baidu_translate(title, summary)
-                    if translated:
-                        article['title_translated'] = translated['title']
-                        article['summary_translated'] = translated['summary']
+                    # translated 现在总是返回字典，包含原始内容+标记
+                    article['title_translated'] = translated['title']
+                    article['summary_translated'] = translated['summary']
                 
                 # 如果是AI新闻源，检查是否AI相关
                 if article_type == 'ai':
@@ -306,8 +468,8 @@ class EnhancedNewsAnalyzer:
                     # 翻译如果英文
                     if article['lang'] == 'en':
                         translated = self.baidu_translate(title, '')
-                        if translated:
-                            article['title_translated'] = translated['title']
+                        # translated 现在总是返回字典，包含原始内容+标记
+                        article['title_translated'] = translated['title']
                     
                     self.all_articles.append(article)
                     if article_type == 'ai':
@@ -413,7 +575,7 @@ class EnhancedNewsAnalyzer:
             # 可选模型: 'gemini-pro', 'gemini-1.5-pro', 'gemini-2.0-flash-exp'
             model = genai.GenerativeModel('gemini-pro')
     
-            # 如果是ArXiv，获取真实摘要（已带缓存）
+            # 如果是ArXiv，优先获取真实摘要（已带缓存）
             full_abstract = ""
             if 'arxiv.org' in article['link']:
                 full_abstract = self.fetch_arxiv_abstract(article['link'])
@@ -472,33 +634,68 @@ class EnhancedNewsAnalyzer:
             return self._fallback_analysis(article)
         
     def _fallback_analysis(self, article):
-            """备用关键词分析，当 Gemini 失败时使用"""
-            text = f"{article['title']} {article.get('summary', '')}".lower()
-            
-            tags = []
-            if any(word in text for word in ['politics', 'government', 'policy', '政治', '政府']):
-                tags.append('政治')
-            if any(word in text for word in ['economy', 'financial', 'market', '经济', '金融']):
-                tags.append('经济')
-            if any(word in text for word in ['technology', 'tech', 'digital', '科技', '技术']):
-                tags.append('科技')
-            if any(word in text for word in ['health', 'medical', '疫情', '疫苗', '健康']):
-                tags.append('健康')
-            if any(word in text for word in ['environment', 'climate', '环保', '气候']):
-                tags.append('环境')
-            if any(word in text for word in ['ai', 'llm', 'gpt', 'transformer', '人工智能', '大模型']):
-                tags.append('AI相关')
-            if not tags:
-                tags = ['综合新闻']
-            
-            return {
-                'content_summary': "暂无详细摘要",
-                'content_tags': tags,
-                'importance_level': '中',
-                'impact_scope': '广泛关注',
-                'attention_reason': '值得关注的新闻报道',
-                'key_points': tags
-            }
+        """备用关键词分析，当 Gemini 失败时使用"""
+        text = f"{article['title']} {article.get('summary', '')}".lower()
+        
+        tags = []
+        
+        # 政治相关
+        if any(word in text for word in ['politics', 'government', 'policy', '政治', '政府', '政策']):
+            tags.append('政治')
+        
+        # 经济相关
+        if any(word in text for word in ['economy', 'financial', 'market', '经济', '金融', '市场']):
+            tags.append('经济')
+        
+        # 科技相关
+        if any(word in text for word in ['technology', 'tech', 'digital', '科技', '技术', '数字化']):
+            tags.append('科技')
+        
+        # 健康医疗
+        if any(word in text for word in ['health', 'medical', '疫情', '疫苗', '健康', '医疗']):
+            tags.append('健康')
+        
+        # 环境生态
+        if any(word in text for word in ['environment', 'climate', '环保', '气候', '环境', '生态']):
+            tags.append('环境')
+        
+        # AI 特定关键词（扩展）
+        ai_keywords = [
+            'ai', 'llm', 'gpt', 'transformer', '人工智能', '大模型', '生成式ai',
+            'reasoning', '推理', 'chain of thought', '思维链', 'cot',
+            'routing', '路由', 'router', '分发',
+            'agent', '智能体', '自主代理',
+            'rlhf', '人类反馈强化学习', 'reinforcement learning',
+            'fine-tuning', '微调', 'adapter', '适配器',
+            'multimodal', '多模态', 'vision', '图像', 'audio', '音频',
+            'embedding', '嵌入', 'vector', '向量',
+            'attention', '注意力', 'self-attention', '自注意力',
+            'few-shot', '少样本', 'zero-shot', '零样本',
+            'prompt', '提示词', 'instruction', '指令',
+            'benchmark', '基准测试', 'evaluation', '评估',
+            'moe', '混合专家', 'sparse', '稀疏',
+            'diffusion', '扩散模型', 'stable diffusion',
+            'rl', '强化学习', 'q-learning',
+            'nlp', '自然语言处理', 'computer vision', '计算机视觉',
+            'robotics', '机器人', 'autonomous', '自动驾驶',
+            'ethics', '伦理', 'bias', '偏见', 'fairness', '公平性'
+        ]
+        
+        if any(word in text for word in ai_keywords):
+            tags.append('AI相关')
+        
+        # 默认标签
+        if not tags:
+            tags = ['综合新闻']
+        
+        return {
+            'content_summary': "暂无详细摘要",
+            'content_tags': tags,
+            'importance_level': '中',
+            'impact_scope': '广泛关注',
+            'attention_reason': '值得关注的新闻报道',
+            'key_points': tags
+        }
     
     def generate_deep_analyses(self, limit=3):
         """生成深度分析（AI新闻）"""
@@ -610,17 +807,13 @@ class EnhancedNewsAnalyzer:
         
         # 1. 中文新闻区
         if cn_articles:
-            section += f"
-### 🇨🇳 中文新闻
-
-"
+            section += f"\n### 🇨🇳 中文新闻\n\n"
             for i, article in enumerate(cn_articles, 1):
                 emoji = "⭐️" if article.get('importance', 0) > 7 else "📍"
                 title = article['title']  # 中文新闻直接显示原标题
                 source = article['source']
                 
-                section += f"{i}. {emoji} **{title}**
-"
+                section += f"{i}. {emoji} **{title}**\n"
                 section += f"   📍 {source}"
                 
                 # 添加互动数据（如果有）
@@ -629,17 +822,11 @@ class EnhancedNewsAnalyzer:
                 if article.get('comments', 0) > 0:
                     section += f" | 💬 {article['comments']}"
                 
-                section += f"
-   🔗 [阅读原文]({article['link']})
-
-"
+                section += f"\n   🔗 [阅读原文]({article['link']})\n\n"
         
         # 2. 国际新闻区（英文，显示翻译+原文）
         if intl_articles:
-            section += f"
-### 🌐 国际新闻
-
-"
+            section += f"\n### 🌐 国际新闻\n\n"
             for i, article in enumerate(intl_articles, 1):
                 emoji = "⭐️" if article.get('importance', 0) > 7 else "📍"
                 
@@ -652,8 +839,7 @@ class EnhancedNewsAnalyzer:
                 section += f"{i}. {emoji} **{title_cn}**"
                 if 'title_translated' in article and title_cn != title_en:
                     section += f" (Original: {title_en})"
-                section += "
-"
+                section += "\n"
                 
                 section += f"   📍 {source}"
                 
@@ -663,10 +849,7 @@ class EnhancedNewsAnalyzer:
                 if article.get('comments', 0) > 0:
                     section += f" | 💬 {article['comments']}"
                 
-                section += f"
-   🔗 [阅读原文]({article['link']})
-
-"
+                section += f"\n   🔗 [阅读原文]({article['link']})\n\n"
         
         # 添加精选事实新闻
         if self.featured_fact:
@@ -815,8 +998,8 @@ class EnhancedNewsAnalyzer:
         
         url = f"https://sctapi.ftqq.com/{self.server_chan_key}.send"
         
-        if len(report) > 6000:
-            report = report[:6000] + "\n\n...（报告过长，已截断）"
+        if len(report) > 20000:
+            report = report[:20000] + "\n\n...（报告过长，已截断）"
         
         data = {
             'title': f"资讯双报告 {datetime.now().strftime('%m-%d')} | AI:{len(self.ai_articles)} 事实:{len(self.fact_articles)}",
@@ -837,45 +1020,164 @@ class EnhancedNewsAnalyzer:
             print(f"❌ 推送请求失败: {e}")
             return False
     
+    async def run_async(self):
+        """异步主执行函数（带异常处理）"""
+        print("=" * 70)
+        print("📊 增强版资讯分析系统启动 (异步模式)")
+        print(f"📅 执行时间: {datetime.now()}")
+        print("=" * 70)
+        
+        try:
+            # 1. 异步抓取AI新闻
+            await self.fetch_all_news_async()
+            
+            # 2. 异步抓取事实新闻
+            await self.fetch_fact_news_async()
+            
+            if not self.all_articles:
+                print("❌ 未抓取到任何文章，程序退出")
+                return self._generate_error_report("未抓取到任何新闻文章"), "抓取失败"
+            
+            # 3. 生成AI深度分析
+            self.generate_deep_analyses(limit=3)
+            
+            # 4. 选择精选文章
+            self.select_featured_articles()
+            
+            # 5. 生成报告
+            report, title = self.generate_report()
+            
+            # 6. 保存报告
+            self.save_reports(report)
+            
+            print(f"\n📊 报告生成完成:")
+            print(f"   AI资讯: {len(self.ai_articles)} 篇")
+            print(f"   事实资讯: {len(self.fact_articles)} 篇")
+            print(f"   报告标题: {title}")
+            
+            return report, title
+            
+        except KeyboardInterrupt:
+            print("\n⚠️ 用户中断执行")
+            return self._generate_error_report("用户手动中断执行"), "执行中断"
+            
+        except Exception as e:
+            print(f"\n❌ 执行过程中发生错误: {e}")
+            import traceback
+            print(f"详细错误信息:\n{traceback.format_exc()}")
+            return self._generate_error_report(f"执行异常: {str(e)}"), "执行失败"
+    
     def run(self):
-        """主执行函数"""
+        """主执行函数（带异常处理）"""
         print("=" * 70)
         print("📊 增强版资讯分析系统启动")
         print(f"📅 执行时间: {datetime.now()}")
         print("=" * 70)
         
-        # 1. 抓取AI新闻
-        self.fetch_all_news()
+        try:
+            # 1. 抓取AI新闻
+            self.fetch_all_news()
+            
+            # 2. 抓取事实新闻
+            self.fetch_fact_news()
+            
+            if not self.all_articles:
+                print("❌ 未抓取到任何文章，程序退出")
+                return self._generate_error_report("未抓取到任何新闻文章"), "抓取失败"
+            
+            # 3. 生成AI深度分析
+            self.generate_deep_analyses(limit=3)
+            
+            # 4. 选择精选文章
+            self.select_featured_articles()
+            
+            # 5. 生成报告
+            report, title = self.generate_report()
+            
+            # 6. 保存报告
+            self.save_reports(report)
+            
+            print(f"\n📊 报告生成完成:")
+            print(f"   AI资讯: {len(self.ai_articles)} 篇")
+            print(f"   事实资讯: {len(self.fact_articles)} 篇")
+            print(f"   报告标题: {title}")
+            
+            return report, title
+            
+        except KeyboardInterrupt:
+            print("\n⚠️ 用户中断执行")
+            return self._generate_error_report("用户手动中断执行"), "执行中断"
+            
+        except Exception as e:
+            print(f"\n❌ 执行过程中发生错误: {e}")
+            import traceback
+            print(f"详细错误信息:\n{traceback.format_exc()}")
+            return self._generate_error_report(f"执行异常: {str(e)}"), "执行失败"
+    
+    def _generate_error_report(self, error_message):
+        """生成错误情况下的简化报告"""
+        current_time = datetime.now().strftime('%Y-%m-%d %H:%M')
         
-        # 2. 抓取事实新闻
-        self.fetch_fact_news()
+        error_report = f"""# 📊 资讯分析报告 (执行失败)
+
+## ⚠️ 执行状态
+- **状态**: 执行失败
+- **错误信息**: {error_message}
+- **执行时间**: {current_time}
+
+## 📈 当前数据统计
+- **AI科技资讯**: {len(self.ai_articles)} 篇
+- **事实资讯**: {len(self.fact_articles)} 篇
+- **深度分析**: {len(self.deep_analyses)} 篇
+
+## 📋 已获取内容预览
+"""
         
-        if not self.all_articles:
-            print("❌ 未抓取到任何文章，程序退出")
-            return None, "无内容"
+        # 添加已成功抓取的文章预览
+        if self.ai_articles:
+            error_report += f"\n### 🤖 已获取的AI资讯 ({len(self.ai_articles)}篇)\n"
+            for i, article in enumerate(self.ai_articles[:5], 1):  # 最多显示5篇
+                title_display = article.get('title_translated', article['title'])
+                error_report += f"{i}. {title_display}\n"
+                error_report += f"   📍 {article['source']} | 🔗 [原文链接]({article['link']})\n\n"
         
-        # 3. 生成AI深度分析
-        self.generate_deep_analyses(limit=3)
+        if self.fact_articles:
+            error_report += f"\n### 🌍 已获取的事实资讯 ({len(self.fact_articles)}篇)\n"
+            for i, article in enumerate(self.fact_articles[:5], 1):  # 最多显示5篇
+                title_display = article.get('title_translated', article['title'])
+                error_report += f"{i}. {title_display}\n"
+                error_report += f"   📍 {article['source']} | 🔗 [原文链接]({article['link']})\n\n"
         
-        # 4. 选择精选文章
-        self.select_featured_articles()
+        error_report += f"""
+---
+
+## 🛠️ 建议解决方案
+1. 检查网络连接是否正常
+2. 确认各新闻源是否可访问
+3. 验证API密钥配置是否正确
+4. 查看详细错误日志定位问题
+
+*报告生成时间: {current_time}*
+"""
         
-        # 5. 生成报告
-        report, title = self.generate_report()
-        
-        # 6. 保存报告
-        self.save_reports(report)
-        
-        print(f"\n📊 报告生成完成:")
-        print(f"   AI资讯: {len(self.ai_articles)} 篇")
-        print(f"   事实资讯: {len(self.fact_articles)} 篇")
-        print(f"   报告标题: {title}")
-        
-        return report, title
+        return error_report
 
 def main():
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='AI科技资讯分析系统')
+    parser.add_argument('--use-async', action='store_true', help='使用异步模式加速抓取')
+    args = parser.parse_args()
+    
     analyzer = EnhancedNewsAnalyzer()
-    report, title = analyzer.run()
+    
+    if args.use_async:
+        # 异步模式
+        print("🚀 启动异步模式...")
+        report, title = asyncio.run(analyzer.run_async())
+    else:
+        # 同步模式（默认）
+        report, title = analyzer.run()
     
     if report:
         if analyzer.server_chan_key:
