@@ -353,16 +353,21 @@ class EnhancedNewsAnalyzer:
 
 
     def fetch_arxiv_abstract(self, url):
+        """从 arXiv 论文详情页提取完整摘要"""
         try:
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
             response = requests.get(url, headers=headers, timeout=10)
-            response.raise_for_status()
+            response.raise_for_status()  # 非 200 抛异常
             
             soup = BeautifulSoup(response.text, 'html.parser')
             abstract_tag = soup.find('blockquote', class_='abstract')
             if abstract_tag:
                 return abstract_tag.text.strip()
-            return ""
+            else:
+                print(f"未找到摘要标签: {url}")
+                return ""
         except Exception as e:
             print(f"抓取 arXiv 摘要失败 {url}: {e}")
             return ""
@@ -378,7 +383,8 @@ class EnhancedNewsAnalyzer:
             model = genai.GenerativeModel('gemini-1.5-flash')
     
             # 如果是ArXiv，获取真实摘要
-            full_abstract = ""
+            full_abstract = self.fetch_arxiv_abstract(article['link'])
+            prompt = f"基于论文标题：{article['title']}，摘要：{full_abstract or article.get('summary', '暂无')}，生成深度分析..."
             if 'arxiv.org' in article['link']:
                 full_abstract = fetch_arxiv_abstract(article['link'])
     
