@@ -409,7 +409,9 @@ class EnhancedNewsAnalyzer:
     
         try:
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            # 使用最新的稳定模型名称（2026年2月可用）
+            # 可选模型: 'gemini-pro', 'gemini-1.5-pro', 'gemini-2.0-flash-exp'
+            model = genai.GenerativeModel('gemini-pro')
     
             # 如果是ArXiv，获取真实摘要（已带缓存）
             full_abstract = ""
@@ -584,41 +586,41 @@ class EnhancedNewsAnalyzer:
                 self.featured_fact = scored_facts[0]
     
     def format_fact_news_section(self):
-        """格式化事实新闻部分，提供中英文对照如果可用"""
+        """格式化事实新闻部分，按中文/国际分组展示"""
         if not self.fact_articles:
             return ""
-        
+
         section = f"""
 ## 🌍 48小时事实资讯速览 ({len(self.fact_articles)}篇)
 
 **新闻来源**: {', '.join(set([a['source'] for a in self.fact_articles[:10]]))}
 
 """
+
+        # 按语言/地区分组：中文 vs 英文
+        cn_articles = []
+        intl_articles = []
         
-        # 按语言/地区分组
-        articles_by_lang = {}
-        for article in self.fact_articles[:10]:  # 确保最多10篇
+        for article in self.fact_articles[:10]:  # 最多10篇
             lang = article.get('lang', 'en')
-            if lang not in articles_by_lang:
-                articles_by_lang[lang] = []
-            articles_by_lang[lang].append(article)
+            if lang == 'zh':
+                cn_articles.append(article)
+            else:
+                intl_articles.append(article)
         
-        for lang, articles in articles_by_lang.items():
-            lang_name = {'en': '🌐 国际新闻', 'zh': '🇨🇳 中文新闻'}.get(lang, '📌 其他新闻')
-            section += f"\n### {lang_name}\n"
-            
-            for i, article in enumerate(articles, 1):
-                # 添加简短的亮点符号
-                emoji = "⭐️" if article.get('importance', 0) > 7 else "📌"
-                title = article.get('title_translated', article['title'])
-                orig_title = article['title'] if 'title_translated' in article else ''
-                
+        # 1. 中文新闻区
+        if cn_articles:
+            section += f"
+### 🇨🇳 中文新闻
+
+"
+            for i, article in enumerate(cn_articles, 1):
+                emoji = "⭐️" if article.get('importance', 0) > 7 else "📍"
+                title = article['title']  # 中文新闻直接显示原标题
                 source = article['source']
                 
-                section += f"{i}. {emoji} **{title}**"
-                if orig_title:
-                    section += f" (Original: {orig_title})"
-                section += "\n"
+                section += f"{i}. {emoji} **{title}**
+"
                 section += f"   📍 {source}"
                 
                 # 添加互动数据（如果有）
@@ -627,7 +629,44 @@ class EnhancedNewsAnalyzer:
                 if article.get('comments', 0) > 0:
                     section += f" | 💬 {article['comments']}"
                 
-                section += f"\n   🔗 [阅读原文]({article['link']})\n\n"
+                section += f"
+   🔗 [阅读原文]({article['link']})
+
+"
+        
+        # 2. 国际新闻区（英文，显示翻译+原文）
+        if intl_articles:
+            section += f"
+### 🌐 国际新闻
+
+"
+            for i, article in enumerate(intl_articles, 1):
+                emoji = "⭐️" if article.get('importance', 0) > 7 else "📍"
+                
+                # 优先显示翻译后的标题
+                title_cn = article.get('title_translated', article['title'])
+                title_en = article['title']
+                source = article['source']
+                
+                # 格式：翻译标题 (Original: 英文原文)
+                section += f"{i}. {emoji} **{title_cn}**"
+                if 'title_translated' in article and title_cn != title_en:
+                    section += f" (Original: {title_en})"
+                section += "
+"
+                
+                section += f"   📍 {source}"
+                
+                # 添加互动数据（如果有）
+                if article.get('points', 0) > 0:
+                    section += f" | 👍 {article['points']}"
+                if article.get('comments', 0) > 0:
+                    section += f" | 💬 {article['comments']}"
+                
+                section += f"
+   🔗 [阅读原文]({article['link']})
+
+"
         
         # 添加精选事实新闻
         if self.featured_fact:
