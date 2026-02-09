@@ -2,5 +2,6 @@ requests>=2.31.0
 beautifulsoup4>=4.12.0
 feedparser>=6.0.10
 lxml>=4.9.0
-zhipuai>=2.0.0
 google-generativeai>=0.8.0
+aiohttp>=3.8.0
+sniffio>=1.3.0
