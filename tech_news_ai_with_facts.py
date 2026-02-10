@@ -531,6 +531,157 @@ class EnhancedNewsAnalyzer:
         )[:10]
     
     # ==================== 原有AI分析功能（保持不变） ====================
+    def fetch_rss(self, source, article_type='ai'):
+        """通用RSS抓取方法（同步版本）"""
+        try:
+            import requests
+            response = requests.get(source['url'], headers=self.headers, timeout=15)
+            if response.status_code == 200:
+                feed = feedparser.parse(response.text)
+                articles_added = 0
+                seen_links = set()
+                
+                for entry in feed.entries[:20]:
+                    if articles_added >= 5:
+                        break
+                        
+                    # 检查发布时间
+                    pub_time = None
+                    if hasattr(entry, 'published_parsed'):
+                        pub_time = datetime(*entry.published_parsed[:6])
+                    elif hasattr(entry, 'updated_parsed'):
+                        pub_time = datetime(*entry.updated_parsed[:6])
+                    
+                    if not pub_time:
+                        pub_time = datetime.now()
+                        article_importance = 4
+                    
+                    if pub_time < self.forty_eight_hours_ago:
+                        continue
+                    
+                    title = entry.get('title', '').strip()
+                    summary = entry.get('summary', '').strip()
+                    link = entry.get('link', '').strip()
+                    
+                    link_hash = hashlib.md5(link.encode()).hexdigest()
+                    if link_hash in seen_links:
+                        continue
+                    seen_links.add(link_hash)
+                    
+                    if summary:
+                        soup = BeautifulSoup(summary, 'html.parser')
+                        summary = soup.get_text()[:250]
+                    
+                    article = {
+                        'id': link_hash[:8],
+                        'title': title[:150],
+                        'link': link,
+                        'source': source['name'],
+                        'summary': summary[:250] + '...' if len(summary) > 250 else summary,
+                        'category': source.get('category', 'general'),
+                        'lang': source.get('lang', 'en'),
+                        'importance': 6,
+                        'time': pub_time.strftime('%Y-%m-%d %H:%M'),
+                        'type': article_type
+                    }
+                    
+                    if article['lang'] == 'en':
+                        translated = self.baidu_translate(title, summary)
+                        article['title_translated'] = translated['title']
+                        article['summary_translated'] = translated['summary']
+                    
+                    if article_type == 'ai':
+                        content = f"{title} {summary}".lower()
+                        ai_keywords = ['ai', 'artificial intelligence', 'machine learning', 
+                                  'deep learning', 'neural network', 'llm', 'gpt', 'transformer',
+                                  '人工智能', '机器学习', '深度学习', '大模型', '生成式AI', '计算机视觉', '图像生成','训练',
+                                  'AIGC', 'Diffusion模型', 'MoE模型', 'RLHF']
+                        
+                        is_ai_related = any(keyword in content for keyword in ai_keywords)
+                        if is_ai_related:
+                            article['importance'] = 8
+                            self.all_articles.append(article)
+                            self.ai_articles.append(article)
+                            articles_added += 1
+                    else:
+                        if link_hash not in [a['id'] for a in self.fact_articles]:
+                            self.all_articles.append(article)
+                            self.fact_articles.append(article)
+                            articles_added += 1
+                
+                print(f"  ✓ {source['name']} 抓取完成 ({articles_added}篇)")
+                return articles_added
+            else:
+                print(f"  ❌ {source['name']} HTTP {response.status_code}")
+                return 0
+        except Exception as e:
+            print(f"  ❌ {source['name']} 抓取出错: {e}")
+            return 0
+    
+    def fetch_hackernews(self, source, article_type='ai'):
+        """通用Hacker News抓取方法（同步版本）"""
+        try:
+            import requests
+            timestamp = int(self.forty_eight_hours_ago.timestamp())
+            query_param = source['url'].format(timestamp)
+            url = query_param
+            
+            if article_type == 'fact' and 'query=AI' in url:
+                url = url.replace('&query=AI', '')
+            
+            response = requests.get(url, timeout=10)
+            
+            if response.status_code == 200:
+                hits = response.json().get('hits', [])
+                seen_links = set()
+                count = 0
+                
+                for hit in hits[:10]:
+                    link = hit.get('url', f"https://news.ycombinator.com/item?id={hit.get('objectID')}")
+                    link_hash = hashlib.md5(link.encode()).hexdigest()
+                    if link_hash in seen_links:
+                        continue
+                    seen_links.add(link_hash)
+                    
+                    title = hit.get('title', '')
+                    
+                    if article_type == 'ai' and not any(keyword in title.lower() for keyword in ['ai', 'llm', 'gpt', 'openai', 'anthropic']):
+                        continue
+                    
+                    article = {
+                        'id': f"hn_{hit.get('objectID', '')}",
+                        'title': title,
+                        'link': link,
+                        'source': source['name'],
+                        'points': hit.get('points', 0),
+                        'comments': hit.get('num_comments', 0),
+                        'category': source.get('category', 'tech'),
+                        'importance': min(9, 6 + (hit.get('points', 0) // 20)),
+                        'time': datetime.fromtimestamp(hit.get('created_at_i', 0)).strftime('%Y-%m-%d %H:%M'),
+                        'type': article_type,
+                        'lang': source.get('lang', 'en')
+                    }
+                    
+                    if article['lang'] == 'en':
+                        translated = self.baidu_translate(title, '')
+                        article['title_translated'] = translated['title']
+                    
+                    self.all_articles.append(article)
+                    if article_type == 'ai':
+                        self.ai_articles.append(article)
+                    else:
+                        self.fact_articles.append(article)
+                    count += 1
+                
+                print(f"  ✓ {source['name']} 抓取完成 ({count}篇)")
+                return count
+            else:
+                print(f"  ❌ {source['name']} HTTP {response.status_code}")
+                return 0
+        except Exception as e:
+            print(f"  ❌ {source['name']} 抓取出错: {e}")
+            return 0
+    
     def fetch_all_news(self):
         """抓取所有新闻"""
         print("📡 开始抓取AI科技新闻（过去48小时）...")
