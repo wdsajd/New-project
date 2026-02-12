@@ -72,19 +72,19 @@ class EnhancedNewsAnalyzer:
             {'name': '量子位', 'url': 'https://www.qbitai.com/feed', 'type': 'rss', 'category': 'cn_ai'},
         ]
         
-        # 更新：多方面事实新闻源，优先中国国内可访问来源，减少重复和过时
+        # 更新：多方面事实新闻源，使用官方推荐URL
         self.fact_news_sources = [
-            # 国内新闻（优先可访问来源）
-            {'name': '央视网', 'url': 'http://news.cctv.com/rss/index.xml', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
-            {'name': '新华网', 'url': 'http://www.news.cn/rss/rsstw.xml', 'type': 'rss', 'category': 'china', 'lang': 'zh'},  # 更新为更稳定的新华网RSS
+            # 国内新闻（使用官方URL）
+            {'name': '央视网', 'url': 'https://news.cctv.com/china/', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
+            {'name': '新华网', 'url': 'http://www.news.cn/', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
             {'name': '人民日报', 'url': 'http://www.people.com.cn/rss/politics.xml', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
             {'name': '澎湃新闻', 'url': 'https://rsshub.app/thepaper/featured', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
-            {'name': '虎扑社区', 'url': 'https://rsshub.app/hupu/bbs/all', 'type': 'rss', 'category': 'community', 'lang': 'zh'},  # 添加虎扑 via RSSHub
-            {'name': '腾讯新闻', 'url': 'https://rsshub.app/tencent/news/author/1', 'type': 'rss', 'category': 'china', 'lang': 'zh'},  # 添加腾讯新闻
-            # 国际/亚太新闻（选择在中国可访问或中立来源）
-            {'name': '联合早报', 'url': 'https://www.zaobao.com/realtime/china/rss', 'type': 'rss', 'category': 'asia', 'lang': 'zh'},  # 更新为中国实时
-            {'name': 'BBC中文', 'url': 'https://feeds.bbci.co.uk/zhongwen/simp/rss.xml', 'type': 'rss', 'category': 'world', 'lang': 'zh'},  # BBC中文版，可访问
-            {'name': 'Reuters China', 'url': 'https://www.reuters.com/arc/outboundfeeds/rss/world/china/', 'type': 'rss', 'category': 'world', 'lang': 'en'},  # Reuters中国相关
+            {'name': '虎扑社区', 'url': 'https://rsshub.app/hupu/bbs/all', 'type': 'rss', 'category': 'community', 'lang': 'zh'},
+            {'name': '腾讯新闻', 'url': 'https://rsshub.app/tencent/news/author/1', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
+            # 国际/亚太新闻（使用官方URL）
+            {'name': '联合早报', 'url': 'https://www.zaobao.com.sg/news/china', 'type': 'rss', 'category': 'asia', 'lang': 'zh'},
+            {'name': 'BBC中文', 'url': 'https://feeds.bbci.co.uk/zhongwen/simp/rss.xml', 'type': 'rss', 'category': 'world', 'lang': 'zh'},
+            {'name': 'Reuters China', 'url': 'https://www.reuters.com/arc/outboundfeeds/rss/world/china/', 'type': 'rss', 'category': 'world', 'lang': 'en'},
             # 社区/综合
             {'name': 'Reddit World News', 'url': 'https://www.reddit.com/r/worldnews/.rss', 'type': 'rss', 'category': 'world', 'lang': 'en'},
             {'name': 'Hacker News Top', 'url': 'https://hn.algolia.com/api/v1/search_by_date?tags=story&numericFilters=created_at_i>{}', 'type': 'hn_api', 'category': 'tech', 'lang': 'en'},
