@@ -42,6 +42,11 @@ class EnhancedNewsAnalyzer:
         # 摘要缓存字典（避免重复请求同一篇论文）
         self.abstract_cache = {}
         
+        # 请求频率控制
+        self.domain_delays = {}  # 记录每个域名的上次请求时间
+        self.min_delay_between_requests = 2  # 最小请求间隔（秒）
+        self.max_concurrent_requests = 3  # 最大并发请求数
+        
         # 防御性检查：API密钥配置提醒
         if not self.gemini_api_key:
             print("⚠️  警告: 未配置 GEMINI_API_KEY 环境变量")
@@ -94,6 +99,34 @@ class EnhancedNewsAnalyzer:
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
+    
+    def _extract_domain(self, url):
+        """从URL提取域名用于频率控制"""
+        from urllib.parse import urlparse
+        try:
+            parsed = urlparse(url)
+            domain = parsed.netloc.lower()
+            # 移除www前缀
+            if domain.startswith('www.'):
+                domain = domain[4:]
+            return domain
+        except:
+            return 'unknown'
+    
+    def _wait_if_needed(self, url):
+        """根据频率控制策略等待适当时间"""
+        domain = self._extract_domain(url)
+        current_time = time.time()
+        
+        if domain in self.domain_delays:
+            elapsed = current_time - self.domain_delays[domain]
+            if elapsed < self.min_delay_between_requests:
+                wait_time = self.min_delay_between_requests - elapsed
+                print(f"  ⏳ 频率控制: 等待 {wait_time:.1f} 秒后再请求 {domain}")
+                time.sleep(wait_time)
+        
+        # 更新该域名的最后请求时间
+        self.domain_delays[domain] = time.time()
     
     # ==================== 新增：百度翻译函数 ====================
     def baidu_translate(self, title, summary):
@@ -532,9 +565,12 @@ class EnhancedNewsAnalyzer:
     
     # ==================== 原有AI分析功能（保持不变） ====================
     def fetch_rss(self, source, article_type='ai'):
-        """通用RSS抓取方法（同步版本，带重试机制）"""
+        """通用RSS抓取方法（同步版本，带重试机制和频率控制）"""
         max_retries = 3
-        retry_delay = 2  # 秒
+        base_delay = 2  # 基础延迟
+        
+        # 频率控制
+        self._wait_if_needed(source['url'])
         
         for attempt in range(max_retries):
             try:
@@ -547,35 +583,54 @@ class EnhancedNewsAnalyzer:
                     'Accept-Encoding': 'gzip, deflate, br',
                     'Connection': 'keep-alive',
                     'Upgrade-Insecure-Requests': '1',
+                    'Sec-Fetch-Dest': 'document',
+                    'Sec-Fetch-Mode': 'navigate',
+                    'Sec-Fetch-Site': 'none',
+                    'Cache-Control': 'max-age=0'
                 }
+                
+                # 对于不同的域名使用不同的User-Agent轮换
+                domain = self._extract_domain(source['url'])
+                user_agents = [
+                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+                    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                ]
+                headers['User-Agent'] = user_agents[hash(domain) % len(user_agents)]
                 
                 response = requests.get(source['url'], headers=headers, timeout=20)
                 
                 # 检查响应状态
                 if response.status_code == 404:
-                    print(f"  ⚠️  {source['name']} 页面不存在 (404)")
-                    if attempt < max_retries - 1:
-                        print(f"     尝试第 {attempt + 2} 次...")
-                        time.sleep(retry_delay)
-                        continue
+                    print(f"  ⚠️  {source['name']} 页面不存在 (404) - 可能URL已变更")
+                    # 对于404错误，不重试，直接返回
                     return 0
                 elif response.status_code == 403:
-                    print(f"  ⚠️  {source['name']} 访问被拒绝 (403)，可能需要代理或降低频率")
+                    print(f"  ⚠️  {source['name']} 访问被拒绝 (403) - 可能需要代理或降低频率")
                     if attempt < max_retries - 1:
-                        print(f"     尝试第 {attempt + 2} 次...")
-                        time.sleep(retry_delay * 2)  # 403错误等待更长时间
+                        # 403错误使用指数退避
+                        delay = base_delay * (2 ** attempt) + random.uniform(0, 2)
+                        print(f"     等待 {delay:.1f} 秒后重试第 {attempt + 2} 次...")
+                        time.sleep(delay)
                         continue
                     return 0
                 elif response.status_code != 200:
                     print(f"  ⚠️  {source['name']} HTTP {response.status_code}")
                     if attempt < max_retries - 1:
-                        print(f"     尝试第 {attempt + 2} 次...")
-                        time.sleep(retry_delay)
+                        delay = base_delay * (attempt + 1) + random.uniform(0, 1)
+                        print(f"     等待 {delay:.1f} 秒后重试第 {attempt + 2} 次...")
+                        time.sleep(delay)
                         continue
                     return 0
                 
                 # 成功获取内容
                 feed = feedparser.parse(response.text)
+                
+                # 检查是否真的有内容
+                if not feed.entries:
+                    print(f"  ⚠️  {source['name']} 返回空内容")
+                    return 0
+                
                 articles_added = 0
                 seen_links = set()
                 
@@ -654,28 +709,31 @@ class EnhancedNewsAnalyzer:
                 if articles_added > 0:
                     print(f"  ✓ {source['name']} 抓取完成 ({articles_added}篇)")
                 else:
-                    print(f"  ⚠️  {source['name']} 无新内容")
+                    print(f"  ⚠️  {source['name']} 无新内容 (过去48小时内)")
                 return articles_added
                 
             except requests.exceptions.Timeout:
                 print(f"  ⚠️  {source['name']} 请求超时")
                 if attempt < max_retries - 1:
-                    print(f"     尝试第 {attempt + 2} 次...")
-                    time.sleep(retry_delay)
+                    delay = base_delay * (attempt + 1) + random.uniform(0, 1)
+                    print(f"     等待 {delay:.1f} 秒后重试第 {attempt + 2} 次...")
+                    time.sleep(delay)
                     continue
                 return 0
             except requests.exceptions.ConnectionError:
                 print(f"  ⚠️  {source['name']} 连接错误")
                 if attempt < max_retries - 1:
-                    print(f"     尝试第 {attempt + 2} 次...")
-                    time.sleep(retry_delay)
+                    delay = base_delay * (attempt + 1) + random.uniform(0, 1)
+                    print(f"     等待 {delay:.1f} 秒后重试第 {attempt + 2} 次...")
+                    time.sleep(delay)
                     continue
                 return 0
             except Exception as e:
                 print(f"  ⚠️  {source['name']} 抓取出错: {e}")
                 if attempt < max_retries - 1:
-                    print(f"     尝试第 {attempt + 2} 次...")
-                    time.sleep(retry_delay)
+                    delay = base_delay * (attempt + 1) + random.uniform(0, 1)
+                    print(f"     等待 {delay:.1f} 秒后重试第 {attempt + 2} 次...")
+                    time.sleep(delay)
                     continue
                 return 0
         
