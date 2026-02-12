@@ -532,11 +532,49 @@ class EnhancedNewsAnalyzer:
     
     # ==================== 原有AI分析功能（保持不变） ====================
     def fetch_rss(self, source, article_type='ai'):
-        """通用RSS抓取方法（同步版本）"""
-        try:
-            import requests
-            response = requests.get(source['url'], headers=self.headers, timeout=15)
-            if response.status_code == 200:
+        """通用RSS抓取方法（同步版本，带重试机制）"""
+        max_retries = 3
+        retry_delay = 2  # 秒
+        
+        for attempt in range(max_retries):
+            try:
+                import requests
+                # 添加更真实的请求头
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1',
+                }
+                
+                response = requests.get(source['url'], headers=headers, timeout=20)
+                
+                # 检查响应状态
+                if response.status_code == 404:
+                    print(f"  ⚠️  {source['name']} 页面不存在 (404)")
+                    if attempt < max_retries - 1:
+                        print(f"     尝试第 {attempt + 2} 次...")
+                        time.sleep(retry_delay)
+                        continue
+                    return 0
+                elif response.status_code == 403:
+                    print(f"  ⚠️  {source['name']} 访问被拒绝 (403)，可能需要代理或降低频率")
+                    if attempt < max_retries - 1:
+                        print(f"     尝试第 {attempt + 2} 次...")
+                        time.sleep(retry_delay * 2)  # 403错误等待更长时间
+                        continue
+                    return 0
+                elif response.status_code != 200:
+                    print(f"  ⚠️  {source['name']} HTTP {response.status_code}")
+                    if attempt < max_retries - 1:
+                        print(f"     尝试第 {attempt + 2} 次...")
+                        time.sleep(retry_delay)
+                        continue
+                    return 0
+                
+                # 成功获取内容
                 feed = feedparser.parse(response.text)
                 articles_added = 0
                 seen_links = set()
@@ -563,6 +601,10 @@ class EnhancedNewsAnalyzer:
                     summary = entry.get('summary', '').strip()
                     link = entry.get('link', '').strip()
                     
+                    # 跳过空标题或链接
+                    if not title or not link:
+                        continue
+                        
                     link_hash = hashlib.md5(link.encode()).hexdigest()
                     if link_hash in seen_links:
                         continue
@@ -609,29 +651,68 @@ class EnhancedNewsAnalyzer:
                             self.fact_articles.append(article)
                             articles_added += 1
                 
-                print(f"  ✓ {source['name']} 抓取完成 ({articles_added}篇)")
+                if articles_added > 0:
+                    print(f"  ✓ {source['name']} 抓取完成 ({articles_added}篇)")
+                else:
+                    print(f"  ⚠️  {source['name']} 无新内容")
                 return articles_added
-            else:
-                print(f"  ❌ {source['name']} HTTP {response.status_code}")
+                
+            except requests.exceptions.Timeout:
+                print(f"  ⚠️  {source['name']} 请求超时")
+                if attempt < max_retries - 1:
+                    print(f"     尝试第 {attempt + 2} 次...")
+                    time.sleep(retry_delay)
+                    continue
                 return 0
-        except Exception as e:
-            print(f"  ❌ {source['name']} 抓取出错: {e}")
-            return 0
+            except requests.exceptions.ConnectionError:
+                print(f"  ⚠️  {source['name']} 连接错误")
+                if attempt < max_retries - 1:
+                    print(f"     尝试第 {attempt + 2} 次...")
+                    time.sleep(retry_delay)
+                    continue
+                return 0
+            except Exception as e:
+                print(f"  ⚠️  {source['name']} 抓取出错: {e}")
+                if attempt < max_retries - 1:
+                    print(f"     尝试第 {attempt + 2} 次...")
+                    time.sleep(retry_delay)
+                    continue
+                return 0
+        
+        return 0  # 所有重试都失败
     
     def fetch_hackernews(self, source, article_type='ai'):
-        """通用Hacker News抓取方法（同步版本）"""
-        try:
-            import requests
-            timestamp = int(self.forty_eight_hours_ago.timestamp())
-            query_param = source['url'].format(timestamp)
-            url = query_param
-            
-            if article_type == 'fact' and 'query=AI' in url:
-                url = url.replace('&query=AI', '')
-            
-            response = requests.get(url, timeout=10)
-            
-            if response.status_code == 200:
+        """通用Hacker News抓取方法（同步版本，带重试机制）"""
+        max_retries = 3
+        retry_delay = 2
+        
+        for attempt in range(max_retries):
+            try:
+                import requests
+                timestamp = int(self.forty_eight_hours_ago.timestamp())
+                query_param = source['url'].format(timestamp)
+                url = query_param
+                
+                if article_type == 'fact' and 'query=AI' in url:
+                    url = url.replace('&query=AI', '')
+                
+                # 使用更真实的请求头
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    'Accept': 'application/json, text/plain, */*',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                }
+                
+                response = requests.get(url, headers=headers, timeout=15)
+                
+                if response.status_code != 200:
+                    print(f"  ⚠️  {source['name']} HTTP {response.status_code}")
+                    if attempt < max_retries - 1:
+                        print(f"     尝试第 {attempt + 2} 次...")
+                        time.sleep(retry_delay)
+                        continue
+                    return 0
+                
                 hits = response.json().get('hits', [])
                 seen_links = set()
                 count = 0
@@ -673,14 +754,35 @@ class EnhancedNewsAnalyzer:
                         self.fact_articles.append(article)
                     count += 1
                 
-                print(f"  ✓ {source['name']} 抓取完成 ({count}篇)")
+                if count > 0:
+                    print(f"  ✓ {source['name']} 抓取完成 ({count}篇)")
+                else:
+                    print(f"  ⚠️  {source['name']} 无符合条件的内容")
                 return count
-            else:
-                print(f"  ❌ {source['name']} HTTP {response.status_code}")
+                
+            except requests.exceptions.Timeout:
+                print(f"  ⚠️  {source['name']} 请求超时")
+                if attempt < max_retries - 1:
+                    print(f"     尝试第 {attempt + 2} 次...")
+                    time.sleep(retry_delay)
+                    continue
                 return 0
-        except Exception as e:
-            print(f"  ❌ {source['name']} 抓取出错: {e}")
-            return 0
+            except requests.exceptions.ConnectionError:
+                print(f"  ⚠️  {source['name']} 连接错误")
+                if attempt < max_retries - 1:
+                    print(f"     尝试第 {attempt + 2} 次...")
+                    time.sleep(retry_delay)
+                    continue
+                return 0
+            except Exception as e:
+                print(f"  ⚠️  {source['name']} 抓取出错: {e}")
+                if attempt < max_retries - 1:
+                    print(f"     尝试第 {attempt + 2} 次...")
+                    time.sleep(retry_delay)
+                    continue
+                return 0
+        
+        return 0
     
     def fetch_all_news(self):
         """抓取所有新闻"""
@@ -740,9 +842,9 @@ class EnhancedNewsAnalyzer:
     
         try:
             genai.configure(api_key=api_key)
-            # 使用最新的稳定模型名称（2026年2月可用）
-            # 可选模型: 'gemini-pro', 'gemini-1.5-pro', 'gemini-2.0-flash-exp'
-            model = genai.GenerativeModel('gemini-pro')
+            # 使用当前可用的稳定模型（2026年2月推荐）
+            # 可选模型: 'gemini-1.5-pro', 'gemini-1.0-pro', 'models/gemini-1.0-pro-001'
+            model = genai.GenerativeModel('gemini-1.5-pro')
     
             # 如果是ArXiv，优先获取真实摘要（已带缓存）
             full_abstract = ""
@@ -793,13 +895,22 @@ class EnhancedNewsAnalyzer:
             print(f"     文章标题: {article.get('title', 'N/A')[:80]}")
             return self._fallback_analysis(article)
         except Exception as e:
-            print(f"  ❌ Gemini分析发生未预期错误:")
-            print(f"     错误类型: {type(e).__name__}")
-            print(f"     错误信息: {str(e)}")
-            print(f"     文章链接: {article.get('link', 'N/A')}")
-            print(f"     文章标题: {article.get('title', 'N/A')[:80]}")
-            import traceback
-            print(f"     堆栈跟踪:\n{traceback.format_exc()}")
+            error_msg = str(e)
+            if "not found for API version" in error_msg or "404" in error_msg:
+                print(f"  ❌ Gemini模型不可用错误:")
+                print(f"     错误信息: {error_msg}")
+                print(f"     可能的解决方案:")
+                print(f"     1. 尝试使用 'gemini-1.5-pro' 或 'gemini-1.0-pro'")
+                print(f"     2. 检查Google AI Studio中的可用模型")
+                print(f"     3. 更新google-generativeai库: pip install --upgrade google-generativeai")
+            else:
+                print(f"  ❌ Gemini分析发生未预期错误:")
+                print(f"     错误类型: {type(e).__name__}")
+                print(f"     错误信息: {str(e)}")
+                print(f"     文章链接: {article.get('link', 'N/A')}")
+                print(f"     文章标题: {article.get('title', 'N/A')[:80]}")
+                import traceback
+                print(f"     堆栈跟踪:\n{traceback.format_exc()}")
             return self._fallback_analysis(article)
         
     def _fallback_analysis(self, article):
