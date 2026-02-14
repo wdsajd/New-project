@@ -24,7 +24,7 @@ jobs:
         # 基础依赖
         pip install requests beautifulsoup4 feedparser lxml
         # AI相关依赖
-        pip install google-generativeai
+        pip install google-generativeai>=0.8.4
         # 异步支持依赖
         pip install aiohttp
         # 其他可能需要的依赖
