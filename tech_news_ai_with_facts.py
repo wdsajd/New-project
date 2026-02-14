@@ -900,9 +900,9 @@ class EnhancedNewsAnalyzer:
     
         try:
             genai.configure(api_key=api_key)
-            # 使用当前可用的稳定模型（2026年2月推荐）
-            # 可选模型: 'gemini-1.5-pro', 'gemini-1.0-pro', 'models/gemini-1.0-pro-001'
-            model = genai.GenerativeModel('gemini-1.5-pro')
+            # 使用当前稳定可用的模型（2026年2月推荐）
+            # 备选模型: 'gemini-1.0-pro', 'gemini-pro', 'models/gemini-1.0-pro-001'
+            model = genai.GenerativeModel('gemini-1.0-pro')
     
             # 如果是ArXiv，优先获取真实摘要（已带缓存）
             full_abstract = ""
@@ -958,9 +958,10 @@ class EnhancedNewsAnalyzer:
                 print(f"  ❌ Gemini模型不可用错误:")
                 print(f"     错误信息: {error_msg}")
                 print(f"     可能的解决方案:")
-                print(f"     1. 尝试使用 'gemini-1.5-pro' 或 'gemini-1.0-pro'")
+                print(f"     1. 尝试使用 'gemini-1.0-pro' 或 'gemini-pro'")
                 print(f"     2. 检查Google AI Studio中的可用模型")
                 print(f"     3. 更新google-generativeai库: pip install --upgrade google-generativeai")
+                print(f"     4. 查看API版本是否为最新 (建议使用v1而非v1beta)")
             else:
                 print(f"  ❌ Gemini分析发生未预期错误:")
                 print(f"     错误类型: {type(e).__name__}")
