@@ -18,6 +18,10 @@ from collections import Counter
 import random  # 用于生成 salt
 import google.generativeai as genai
 from bs4 import BeautifulSoup
+from fake_useragent import UserAgent
+import random
+
+ua = UserAgent()
 
 # 条件导入异步库（提供友好的错误提示）
 try:
@@ -74,20 +78,17 @@ class EnhancedNewsAnalyzer:
         
         # 更新：多方面事实新闻源，使用官方推荐URL
         self.fact_news_sources = [
-            # 国内新闻（使用官方URL）
-            {'name': '央视网', 'url': 'https://news.cctv.com/china/', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
-            {'name': '新华网', 'url': 'http://www.news.cn/', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
+            # 国内新闻（使用官方或稳定 RSS）
+            {'name': '央视网', 'url': 'https://rsshub.app/cctv/news/china', 'type': 'rss', 'category': 'china', 'lang': 'zh'},  # RSSHub 路由
+            {'name': '新华网', 'url': 'https://rsshub.app/xinhua/index', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
             {'name': '人民日报', 'url': 'http://www.people.com.cn/rss/politics.xml', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
-            {'name': '澎湃新闻', 'url': 'https://rsshub.app/thepaper/featured', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
+            {'name': '澎湃新闻', 'url': 'https://rsshub.app/thepaper/featured', 'type': 'rss', 'category': 'china', 'lang': 'zh'},  # 保留，但需加强反爬
             {'name': '虎扑社区', 'url': 'https://rsshub.app/hupu/bbs/all', 'type': 'rss', 'category': 'community', 'lang': 'zh'},
             {'name': '腾讯新闻', 'url': 'https://rsshub.app/tencent/news/author/1', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
-            # 国际/亚太新闻（使用官方URL）
-            {'name': '联合早报', 'url': 'https://www.zaobao.com.sg/news/china', 'type': 'rss', 'category': 'asia', 'lang': 'zh'},
+            {'name': '联合早报', 'url': 'https://www.zaobao.com.sg/news/china/rss', 'type': 'rss', 'category': 'asia', 'lang': 'zh'},
             {'name': 'BBC中文', 'url': 'https://feeds.bbci.co.uk/zhongwen/simp/rss.xml', 'type': 'rss', 'category': 'world', 'lang': 'zh'},
             {'name': 'Reuters China', 'url': 'https://www.reuters.com/arc/outboundfeeds/rss/world/china/', 'type': 'rss', 'category': 'world', 'lang': 'en'},
-            # 社区/综合
-            {'name': 'Reddit World News', 'url': 'https://www.reddit.com/r/worldnews/.rss', 'type': 'rss', 'category': 'world', 'lang': 'en'},
-            {'name': 'Hacker News Top', 'url': 'https://hn.algolia.com/api/v1/search_by_date?tags=story&numericFilters=created_at_i>{}', 'type': 'hn_api', 'category': 'tech', 'lang': 'en'},
+            {'name': 'TechCrunch AI', 'url': 'https://techcrunch.com/category/artificial-intelligence/', 'type': 'html', 'category': 'tech', 'lang': 'en'}
         ]
         
         self.all_articles = []
@@ -562,7 +563,7 @@ class EnhancedNewsAnalyzer:
             key=lambda x: (x.get('importance', 5), datetime.strptime(x['time'], '%Y-%m-%d %H:%M') if x.get('time') else datetime.now()), 
             reverse=True
         )[:10]
-    
+        
     # ==================== 原有AI分析功能（保持不变） ====================
     def fetch_rss(self, source, article_type='ai'):
         """通用RSS抓取方法（同步版本，带重试机制和频率控制）"""
