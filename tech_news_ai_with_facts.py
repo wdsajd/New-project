@@ -18,10 +18,17 @@ from collections import Counter
 import random  # 用于生成 salt
 import google.generativeai as genai
 from bs4 import BeautifulSoup
-from fake_useragent import UserAgent
-import random
 
-ua = UserAgent()
+# 尝试导入 fake_useragent（可选）
+try:
+    from fake_useragent import UserAgent
+    UA_AVAILABLE = True
+    ua = UserAgent()
+except ImportError:
+    print("⚠️  警告: 未安装 fake_useragent，将使用默认 User-Agent")
+    print("   安装命令: pip install fake-useragent")
+    UA_AVAILABLE = False
+    ua = None
 
 # 条件导入异步库（提供友好的错误提示）
 try:
@@ -76,7 +83,7 @@ class EnhancedNewsAnalyzer:
             {'name': '量子位', 'url': 'https://www.qbitai.com/feed', 'type': 'rss', 'category': 'cn_ai'},
         ]
         
-        # 更新：多方面事实新闻源，使用官方推荐URL
+        # 更新：多方面事实新闻源，使用RSSHub和官方RSS
         self.fact_news_sources = [
             # 国内新闻（使用官方或稳定 RSS）
             {'name': '央视网', 'url': 'https://rsshub.app/cctv/news/china', 'type': 'rss', 'category': 'china', 'lang': 'zh'},  # RSSHub 路由
@@ -88,7 +95,9 @@ class EnhancedNewsAnalyzer:
             {'name': '联合早报', 'url': 'https://www.zaobao.com.sg/news/china/rss', 'type': 'rss', 'category': 'asia', 'lang': 'zh'},
             {'name': 'BBC中文', 'url': 'https://feeds.bbci.co.uk/zhongwen/simp/rss.xml', 'type': 'rss', 'category': 'world', 'lang': 'zh'},
             {'name': 'Reuters China', 'url': 'https://www.reuters.com/arc/outboundfeeds/rss/world/china/', 'type': 'rss', 'category': 'world', 'lang': 'en'},
-            {'name': 'TechCrunch AI', 'url': 'https://techcrunch.com/category/artificial-intelligence/', 'type': 'html', 'category': 'tech', 'lang': 'en'}
+            # TechCrunch AI - HTML解析
+            {'name': 'TechCrunch AI', 'url': 'https://techcrunch.com/category/artificial-intelligence/', 'type': 'html', 'category': 'tech', 'lang': 'en'},
+            # ... 其他
         ]
         
         self.all_articles = []
@@ -100,6 +109,44 @@ class EnhancedNewsAnalyzer:
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
+    
+    def _get_headers(self, url=None):
+        """生成随机请求头"""
+        if UA_AVAILABLE and ua:
+            user_agent = ua.random
+        else:
+            # 备用 User-Agent 列表
+            user_agents = [
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            ]
+            user_agent = random.choice(user_agents)
+        
+        headers = {
+            'User-Agent': user_agent,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Cache-Control': 'max-age=0',
+        }
+        
+        # 特定网站添加 Referer
+        if url:
+            if 'thepaper' in url:
+                headers['Referer'] = 'https://www.thepaper.cn/'
+            elif 'hupu' in url:
+                headers['Referer'] = 'https://www.hupu.com/'
+            elif 'techcrunch' in url:
+                headers['Referer'] = 'https://techcrunch.com/'
+        
+        return headers
     
     def _extract_domain(self, url):
         """从URL提取域名用于频率控制"""
@@ -544,6 +591,8 @@ class EnhancedNewsAnalyzer:
                     self.fetch_rss(source, article_type='fact')
                 elif source['type'] == 'hn_api':
                     self.fetch_hackernews(source, article_type='fact')
+                elif source['type'] == 'html':
+                    self.fetch_html(source, article_type='fact')
                 time.sleep(1)  # 礼貌延迟
             except Exception as e:
                 print(f"    ❌ 抓取失败: {e}")
@@ -563,7 +612,7 @@ class EnhancedNewsAnalyzer:
             key=lambda x: (x.get('importance', 5), datetime.strptime(x['time'], '%Y-%m-%d %H:%M') if x.get('time') else datetime.now()), 
             reverse=True
         )[:10]
-        
+    
     # ==================== 原有AI分析功能（保持不变） ====================
     def fetch_rss(self, source, article_type='ai'):
         """通用RSS抓取方法（同步版本，带重试机制和频率控制）"""
@@ -576,30 +625,12 @@ class EnhancedNewsAnalyzer:
         for attempt in range(max_retries):
             try:
                 import requests
-                # 添加更真实的请求头
-                headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                    'Connection': 'keep-alive',
-                    'Upgrade-Insecure-Requests': '1',
-                    'Sec-Fetch-Dest': 'document',
-                    'Sec-Fetch-Mode': 'navigate',
-                    'Sec-Fetch-Site': 'none',
-                    'Cache-Control': 'max-age=0'
-                }
+                # 使用新的随机请求头生成方法
+                headers = self._get_headers(source['url'])
                 
-                # 对于不同的域名使用不同的User-Agent轮换
-                domain = self._extract_domain(source['url'])
-                user_agents = [
-                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
-                    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-                ]
-                headers['User-Agent'] = user_agents[hash(domain) % len(user_agents)]
-                
-                response = requests.get(source['url'], headers=headers, timeout=20)
+                # 使用 Session 保持连接
+                session = requests.Session()
+                response = session.get(source['url'], headers=headers, timeout=20)
                 
                 # 检查响应状态
                 if response.status_code == 404:
@@ -609,9 +640,9 @@ class EnhancedNewsAnalyzer:
                 elif response.status_code == 403:
                     print(f"  ⚠️  {source['name']} 访问被拒绝 (403) - 可能需要代理或降低频率")
                     if attempt < max_retries - 1:
-                        # 403错误使用指数退避
-                        delay = base_delay * (2 ** attempt) + random.uniform(0, 2)
-                        print(f"     等待 {delay:.1f} 秒后重试第 {attempt + 2} 次...")
+                        # 403错误使用指数退避，增加随机延迟
+                        delay = base_delay * (2 ** attempt) + random.uniform(0, 3)
+                        print(f"     更换 UA，等待 {delay:.1f} 秒后重试第 {attempt + 2} 次...")
                         time.sleep(delay)
                         continue
                     return 0
@@ -842,6 +873,154 @@ class EnhancedNewsAnalyzer:
                 return 0
         
         return 0
+    
+    def fetch_html(self, source, article_type='fact'):
+        """HTML页面解析方法，专门用于TechCrunch等网站"""
+        try:
+            # 频率控制
+            self._wait_if_needed(source['url'])
+            
+            # 使用更真实的请求头来避免反爬
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Cache-Control': 'max-age=0'
+            }
+            
+            response = requests.get(source['url'], headers=headers, timeout=20)
+            
+            if response.status_code != 200:
+                print(f"  ⚠️  {source['name']} HTTP {response.status_code}")
+                return 0
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            articles_added = 0
+            seen_links = set()
+            
+            # TechCrunch AI页面的特定选择器
+            # 查找文章条目容器
+            article_items = soup.select('article.post-block')
+            
+            # 如果上述选择器无效，尝试通用的文章选择器
+            if not article_items:
+                article_items = soup.find_all('article')
+            
+            # 如果仍然无效，尝试h2标签包含文章链接的格式
+            if not article_items:
+                article_items = soup.find_all('h2')
+            
+            print(f"  → 找到 {len(article_items)} 个可能的文章元素")
+            
+            for item in article_items[:15]:  # 限制检查数量
+                if articles_added >= 5:  # 每个源最多取5条
+                    break
+                
+                # 提取标题和链接
+                title_elem = None
+                link_elem = None
+                
+                # 尝试不同的HTML结构
+                if item.name == 'article':
+                    # 标准article标签
+                    title_elem = item.find('h2') or item.find('h3') or item.find('h1')
+                    link_elem = item.find('a')
+                elif item.name == 'h2':
+                    # 直接是h2标签
+                    title_elem = item
+                    link_elem = item.find('a')
+                else:
+                    # 其他情况
+                    title_elem = item.find('h2') or item.find('h3') or item.find('h1')
+                    link_elem = item.find('a')
+                
+                if not title_elem or not link_elem:
+                    continue
+                
+                title = title_elem.get_text().strip()
+                link = link_elem.get('href', '')
+                
+                # 处理相对链接
+                if link and not link.startswith('http'):
+                    from urllib.parse import urljoin
+                    link = urljoin(source['url'], link)
+                
+                if not title or not link:
+                    continue
+                
+                # 去重检查
+                link_hash = hashlib.md5(link.encode()).hexdigest()
+                if link_hash in seen_links:
+                    continue
+                seen_links.add(link_hash)
+                
+                # 检查是否为AI相关（对于fact类型的文章可以放宽限制）
+                if article_type == 'ai':
+                    content = title.lower()
+                    ai_keywords = ['ai', 'artificial intelligence', 'machine learning', 'deep learning', 'neural network', 'llm', 'gpt', 'transformer']
+                    is_ai_related = any(keyword in content for keyword in ai_keywords)
+                    if not is_ai_related:
+                        continue
+                
+                # 提取摘要（如果有）
+                summary = ''
+                excerpt_elem = item.find(class_=re.compile(r'excerpt|summary|description'))
+                if excerpt_elem:
+                    summary = excerpt_elem.get_text().strip()
+                elif item.name == 'article':
+                    # 在article内查找段落
+                    p_elem = item.find('p')
+                    if p_elem:
+                        summary = p_elem.get_text().strip()
+                
+                # 估算发布时间（使用当前时间，因为HTML页面通常不直接显示具体时间）
+                pub_time = datetime.now()
+                
+                article = {
+                    'id': link_hash[:8],
+                    'title': title[:150],
+                    'link': link,
+                    'source': source['name'],
+                    'summary': summary[:250] + '...' if len(summary) > 250 else summary,
+                    'category': source.get('category', 'general'),
+                    'lang': source.get('lang', 'en'),
+                    'importance': 6,
+                    'time': pub_time.strftime('%Y-%m-%d %H:%M'),
+                    'type': article_type
+                }
+                
+                # 翻译英文内容
+                if article['lang'] == 'en':
+                    translated = self.baidu_translate(title, summary)
+                    article['title_translated'] = translated['title']
+                    article['summary_translated'] = translated['summary']
+                
+                # 添加到相应列表
+                self.all_articles.append(article)
+                if article_type == 'ai':
+                    self.ai_articles.append(article)
+                else:
+                    self.fact_articles.append(article)
+                articles_added += 1
+                
+                print(f"    ✓ 解析文章: {title[:60]}...")
+            
+            if articles_added > 0:
+                print(f"  ✓ {source['name']} HTML解析完成 ({articles_added}篇)")
+            else:
+                print(f"  ⚠️  {source['name']} 未找到符合条件的文章")
+            
+            return articles_added
+            
+        except Exception as e:
+            print(f"  ❌ {source['name']} HTML解析出错: {e}")
+            return 0
     
     def fetch_all_news(self):
         """抓取所有新闻"""
