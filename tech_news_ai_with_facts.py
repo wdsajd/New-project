@@ -89,7 +89,7 @@ class EnhancedNewsAnalyzer:
             # 国内新闻（已验证可用的 RSS）
             {'name': '人民网', 'url': 'http://www.people.com.cn/rss/politics.xml', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
             {'name': '中国新闻网', 'url': 'https://www.chinanews.com.cn/rss/scroll-news.xml', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
-            {'name': '凤凰网资讯', 'url': 'https://news.ifeng.com/shanklist/1-35081-', 'type': 'rss', 'category': 'china', 'lang': 'zh'},  # 更新 RSS
+            {'name': '凤凰网资讯', 'url': 'https://news.ifeng.com/rss', 'type': 'rss', 'category': 'china', 'lang': 'zh'},  # 凤凰网官方 RSS
             # 国际新闻（稳定 RSS）
             {'name': 'BBC中文', 'url': 'https://feeds.bbci.co.uk/zhongwen/simp/rss.xml', 'type': 'rss', 'category': 'world', 'lang': 'zh'},
             {'name': 'FT中文网', 'url': 'https://www.ftchinese.com/rss/news', 'type': 'rss', 'category': 'world', 'lang': 'zh'},
@@ -306,7 +306,7 @@ class EnhancedNewsAnalyzer:
                             'authors': authors,
                             'category': 'research',
                             'importance': 9,
-                            'time': datetime.now().strftime('%Y-%m-%d'),
+                            'time': datetime.now().strftime('%Y-%m-%d %H:%M'),  # 统一时间格式
                             'type': 'ai',
                             'lang': 'en'
                         }
@@ -574,8 +574,19 @@ class EnhancedNewsAnalyzer:
                     return 0
                 
                 # 设置正确的编码（中文 RSS 源通常为 UTF-8 或 GBK）
-                if response.apparent_encoding:
-                    response.encoding = response.apparent_encoding
+                # 优先使用响应头中的编码，其次是 apparent_encoding
+                if response.headers.get('content-type') and 'charset=' in response.headers['content-type']:
+                    pass  # requests 已自动处理
+                elif response.apparent_encoding:
+                    # 对于中文网站，尝试多种编码
+                    apparent = response.apparent_encoding.lower()
+                    if 'gb' in apparent or 'gbk' in apparent or 'gb2312' in apparent:
+                        try:
+                            response.encoding = 'gbk'
+                        except:
+                            response.encoding = 'utf-8'
+                    else:
+                        response.encoding = 'utf-8'
                 elif 'zh' in source.get('lang', ''):
                     response.encoding = 'utf-8'
                 
@@ -1089,14 +1100,44 @@ class EnhancedNewsAnalyzer:
     """
     
             response = model.generate_content(prompt)
+            
+            # 检查响应是否为空
+            if not response or not response.text:
+                print(f"  ⚠️  Gemini 返回空响应，使用备用分析")
+                return self._fallback_analysis(article)
+            
             text = response.text.strip()
-            json_match = re.search(r'\{.*\}', text, re.DOTALL)
+            
+            # 检查文本内容是否为空或太短
+            if not text or len(text) < 10:
+                print(f"  ⚠️  Gemini 返回内容过短 ({len(text)} 字符)，使用备用分析")
+                return self._fallback_analysis(article)
+            
+            # 改进的 JSON 提取（使用更精确的正则）
+            json_match = re.search(r'\{[^{}]*\}', text, re.DOTALL)
+            if not json_match:
+                # 尝试查找代码块中的 JSON
+                code_block_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', text, re.DOTALL)
+                if code_block_match:
+                    json_text = code_block_match.group(1).strip()
+                    try:
+                        analysis_result = json.loads(json_text)
+                        if 'key_points' not in analysis_result:
+                            analysis_result['key_points'] = analysis_result.get('content_tags', [])[:3]
+                        return analysis_result
+                    except json.JSONDecodeError:
+                        pass
+            
             if json_match:
-                analysis_result = json.loads(json_match.group(0))
-                # 确保 key_points 存在
-                if 'key_points' not in analysis_result:
-                    analysis_result['key_points'] = analysis_result.get('content_tags', [])[:3]
-                return analysis_result
+                try:
+                    analysis_result = json.loads(json_match.group(0))
+                    # 确保 key_points 存在
+                    if 'key_points' not in analysis_result:
+                        analysis_result['key_points'] = analysis_result.get('content_tags', [])[:3]
+                    return analysis_result
+                except json.JSONDecodeError as e:
+                    print(f"  ⚠️  Gemini JSON 解析失败: {e}")
+                    return self._fallback_analysis(article)
             else:
                 print(f"  ⚠️  Gemini返回格式异常，无法解析JSON，使用备用分析")
                 return self._fallback_analysis(article)
