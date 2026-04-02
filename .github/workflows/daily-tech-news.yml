@@ -47,5 +47,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: ai-news-analysis
-        path: ai_news_analysis.json
+        path: |
+          enhanced_news_analysis.json
+          enhanced_news_report.md
         retention-days: 5
