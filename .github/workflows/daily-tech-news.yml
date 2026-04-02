@@ -2,7 +2,7 @@ name: AI Tech News Daily
 
 on:
   schedule:
-    - cron: '0 9 * * *'
+    - cron: '0 1 * * *'  # 北京时间 9:00 (UTC+8 = UTC 1:00)
   repository_dispatch: {}
   workflow_dispatch: {}
 jobs:
