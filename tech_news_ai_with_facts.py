@@ -83,18 +83,21 @@ class EnhancedNewsAnalyzer:
             {'name': '量子位', 'url': 'https://www.qbitai.com/feed', 'type': 'rss', 'category': 'cn_ai'},
         ]
         
-        # 更新：多方面事实新闻源，使用RSSHub和官方RSS
+        # 更新：多方面事实新闻源
+        # 注意：RSSHub (rsshub.app) 在 GitHub Actions 环境中可能不稳定，返回 403/404
+        # 已替换为更稳定的直接 RSS 源
         self.fact_news_sources = [
-            # 国内新闻（使用官方或稳定 RSS）
-            {'name': '央视网', 'url': 'https://rsshub.app/cctv/news/china', 'type': 'rss', 'category': 'china', 'lang': 'zh'},  # RSSHub 路由
-            {'name': '新华网', 'url': 'https://rsshub.app/xinhua/index', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
+            # 国内新闻（使用官方 RSS，更稳定）
             {'name': '人民日报', 'url': 'http://www.people.com.cn/rss/politics.xml', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
-            {'name': '澎湃新闻', 'url': 'https://rsshub.app/thepaper/featured', 'type': 'rss', 'category': 'china', 'lang': 'zh'},  # 保留，但需加强反爬
-            {'name': '虎扑社区', 'url': 'https://rsshub.app/hupu/bbs/all', 'type': 'rss', 'category': 'community', 'lang': 'zh'},
-            {'name': '腾讯新闻', 'url': 'https://rsshub.app/tencent/news/author/1', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
+            {'name': '新华网', 'url': 'https://www.news.cn/rss/xhs.xml', 'type': 'rss', 'category': 'china', 'lang': 'zh'},  # 新华网官方 RSS
+            {'name': '澎湃新闻', 'url': 'https://www.thepaper.cn/rss', 'type': 'rss', 'category': 'china', 'lang': 'zh'},  # 澎湃官方 RSS
+            {'name': '腾讯新闻', 'url': 'https://www.qq.com/rss/news.xml', 'type': 'rss', 'category': 'china', 'lang': 'zh'},  # 腾讯 RSS
+            {'name': '凤凰网', 'url': 'http://www.ifeng.com/rss/news.xml', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
+            # 国际新闻（稳定 RSS）
             {'name': '联合早报', 'url': 'https://www.zaobao.com.sg/news/china/rss', 'type': 'rss', 'category': 'asia', 'lang': 'zh'},
             {'name': 'BBC中文', 'url': 'https://feeds.bbci.co.uk/zhongwen/simp/rss.xml', 'type': 'rss', 'category': 'world', 'lang': 'zh'},
-            {'name': 'Reuters China', 'url': 'https://www.reuters.com/arc/outboundfeeds/rss/world/china/', 'type': 'rss', 'category': 'world', 'lang': 'en'},
+            {'name': 'Reuters China', 'url': 'https://www.reutersagency.com/feed/?taxonomy=best-topics&post_type=best', 'type': 'rss', 'category': 'world', 'lang': 'zh'},
+            {'name': '纽约时报中文', 'url': 'https://cn.nytimes.com/rss.html', 'type': 'rss', 'category': 'world', 'lang': 'zh'},
             # TechCrunch AI - HTML解析
             {'name': 'TechCrunch AI', 'url': 'https://techcrunch.com/category/artificial-intelligence/', 'type': 'html', 'category': 'tech', 'lang': 'en'},
             # ... 其他
@@ -237,7 +240,7 @@ class EnhancedNewsAnalyzer:
     def fetch_arxiv(self, source):
         """抓取Arxiv AI论文"""
         try:
-            response = requests.get(source['url'], headers=self.headers, timeout=15)
+            response = requests.get(source['url'], headers=self._get_headers(source['url']), timeout=15)
             if response.status_code == 200:
                 soup = BeautifulSoup(response.text, 'html.parser')
                 dt_list = soup.find_all('dt')
@@ -436,149 +439,7 @@ class EnhancedNewsAnalyzer:
         except Exception as e:
             print(f"  ❌ {source['name']} 抓取出错: {e}")
             return 0
-        """通用RSS抓取方法，增强去重和时效性"""
-        try:
-            feed = feedparser.parse(source['url'])
-            articles_added = 0
-            seen_links = set()  # 增强去重
-            
-            for entry in feed.entries[:20]:  # 增加检查范围以获取更多新鲜内容
-                if articles_added >= 5:  # 每个源最多取5条
-                    break
-                    
-                # 检查发布时间
-                pub_time = None
-                if hasattr(entry, 'published_parsed'):
-                    pub_time = datetime(*entry.published_parsed[:6])
-                elif hasattr(entry, 'updated_parsed'):
-                    pub_time = datetime(*entry.updated_parsed[:6])
-                
-                # 如果无法获取时间，使用当前时间但降低优先级
-                if not pub_time:
-                    pub_time = datetime.now()
-                    article_importance = 4  # 降低未知时间的重要性
-                
-                # 检查是否在过去48小时内
-                if pub_time < self.forty_eight_hours_ago:
-                    continue
-                
-                title = entry.get('title', '').strip()
-                summary = entry.get('summary', '').strip()
-                link = entry.get('link', '').strip()
-                
-                # 去重检查
-                link_hash = hashlib.md5(link.encode()).hexdigest()
-                if link_hash in seen_links:
-                    continue
-                seen_links.add(link_hash)
-                
-                # 清理HTML标签
-                if summary:
-                    soup = BeautifulSoup(summary, 'html.parser')
-                    summary = soup.get_text()[:250]
-                
-                article = {
-                    'id': link_hash[:8],
-                    'title': title[:150],
-                    'link': link,
-                    'source': source['name'],
-                    'summary': summary[:250] + '...' if len(summary) > 250 else summary,
-                    'category': source.get('category', 'general'),
-                    'lang': source.get('lang', 'en'),
-                    'importance': 6,
-                    'time': pub_time.strftime('%Y-%m-%d %H:%M'),
-                    'type': article_type
-                }
-                
-                # 如果是英文，进行翻译以提供中英文对照
-                if article['lang'] == 'en':
-                    translated = self.baidu_translate(title, summary)
-                    # translated 现在总是返回字典，包含原始内容+标记
-                    article['title_translated'] = translated['title']
-                    article['summary_translated'] = translated['summary']
-                
-                # 如果是AI新闻源，检查是否AI相关
-                if article_type == 'ai':
-                    content = f"{title} {summary}".lower()
-                    ai_keywords = ['ai', 'artificial intelligence', 'machine learning', 
-                              'deep learning', 'neural network', 'llm', 'gpt', 'transformer',
-                              '人工智能', '机器学习', '深度学习', '大模型', '生成式AI', '计算机视觉', '图像生成','训练',
-                              'AIGC', 'Diffusion模型', 'MoE模型', 'RLHF']
-                    
-                    is_ai_related = any(keyword in content for keyword in ai_keywords)
-                    if is_ai_related:
-                        article['importance'] = 8
-                        self.all_articles.append(article)
-                        self.ai_articles.append(article)
-                        articles_added += 1
-                else:
-                    # 事实新闻直接添加，检查重复
-                    if link_hash not in [a['id'] for a in self.fact_articles]:
-                        self.all_articles.append(article)
-                        self.fact_articles.append(article)
-                        articles_added += 1
-                    
-        except Exception as e:
-            print(f"⚠️ RSS抓取失败 {source['name']}: {e}")
-    
-    def fetch_hackernews(self, source, article_type='ai'):
-        """通用Hacker News抓取方法"""
-        try:
-            timestamp = int(self.forty_eight_hours_ago.timestamp())
-            query_param = source['url'].format(timestamp)
-            url = query_param
-            
-            # 如果不是AI专用搜索，移除AI查询参数
-            if article_type == 'fact' and 'query=AI' in url:
-                url = url.replace('&query=AI', '')
-            
-            response = requests.get(url, timeout=10)
-            
-            if response.status_code == 200:
-                hits = response.json().get('hits', [])
-                seen_links = set()
-                for hit in hits[:10]:
-                    link = hit.get('url', f"https://news.ycombinator.com/item?id={hit.get('objectID')}")
-                    link_hash = hashlib.md5(link.encode()).hexdigest()
-                    if link_hash in seen_links:
-                        continue
-                    seen_links.add(link_hash)
-                    
-                    title = hit.get('title', '')
-                    
-                    # 对于事实新闻，不筛选AI内容
-                    if article_type == 'ai' and not any(keyword in title.lower() for keyword in ['ai', 'llm', 'gpt', 'openai', 'anthropic']):
-                        continue
-                    
-                    article = {
-                        'id': f"hn_{hit.get('objectID', '')}",
-                        'title': title,
-                        'link': link,
-                        'source': source['name'],
-                        'points': hit.get('points', 0),
-                        'comments': hit.get('num_comments', 0),
-                        'category': source.get('category', 'tech'),
-                        'importance': min(9, 6 + (hit.get('points', 0) // 20)),
-                        'time': datetime.fromtimestamp(hit.get('created_at_i', 0)).strftime('%Y-%m-%d %H:%M'),
-                        'type': article_type,
-                        'lang': source.get('lang', 'en')
-                    }
-                    
-                    # 翻译如果英文
-                    if article['lang'] == 'en':
-                        translated = self.baidu_translate(title, '')
-                        # translated 现在总是返回字典，包含原始内容+标记
-                        article['title_translated'] = translated['title']
-                    
-                    self.all_articles.append(article)
-                    if article_type == 'ai':
-                        self.ai_articles.append(article)
-                    else:
-                        self.fact_articles.append(article)
-                        
-        except Exception as e:
-            print(f"⚠️ Hacker News抓取失败: {e}")
-    
+
     # ==================== 新增：抓取事实新闻 ====================
     def fetch_fact_news(self):
         """抓取多方面事实新闻"""
@@ -1080,9 +941,10 @@ class EnhancedNewsAnalyzer:
     
         try:
             genai.configure(api_key=api_key)
-            # 使用当前稳定可用的模型（2026年2月推荐）
-            # 备选模型: 'gemini-1.0-pro', 'gemini-pro', 'models/gemini-1.0-pro-001'
-            model = genai.GenerativeModel('gemini-1.0-pro')
+            # 使用当前稳定可用的模型
+            # 推荐: 'gemini-1.5-flash' (快速/免费), 'gemini-1.5-pro' (高性能)
+            # 备选: 'gemini-1.0-pro', 'gemini-pro'
+            model = genai.GenerativeModel('gemini-1.5-flash')
     
             # 如果是ArXiv，优先获取真实摘要（已带缓存）
             full_abstract = ""
@@ -1138,8 +1000,8 @@ class EnhancedNewsAnalyzer:
                 print(f"  ❌ Gemini模型不可用错误:")
                 print(f"     错误信息: {error_msg}")
                 print(f"     可能的解决方案:")
-                print(f"     1. 尝试使用 'gemini-1.0-pro' 或 'gemini-pro'")
-                print(f"     2. 检查Google AI Studio中的可用模型")
+                print(f"     1. 尝试使用 'gemini-1.5-flash' 或 'gemini-1.5-pro'")
+                print(f"     2. 检查Google AI Studio中的可用模型列表")
                 print(f"     3. 更新google-generativeai库: pip install --upgrade google-generativeai")
                 print(f"     4. 查看API版本是否为最新 (建议使用v1而非v1beta)")
             else:
