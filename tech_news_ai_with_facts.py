@@ -74,33 +74,30 @@ class EnhancedNewsAnalyzer:
             print("⚠️  警告: 未配置百度翻译 API（BAIDU_APPID/BAIDU_SECRET_KEY）")
             print("   → 英文内容将不会被翻译为中文\n")
         
-        # AI科技新闻源（保持不变）
+        # AI科技新闻源
         self.ai_news_sources = [
-            {'name': 'Arxiv AI Papers', 'url': 'http://arxiv.org/list/cs.AI/recent', 'type': 'arxiv', 'category': 'ai_research'},
+            {'name': 'Arxiv AI Papers', 'url': 'https://arxiv.org/list/cs.AI/recent', 'type': 'arxiv', 'category': 'ai_research'},  # 使用 HTTPS
             {'name': 'TechCrunch AI', 'url': 'https://techcrunch.com/category/artificial-intelligence/feed/', 'type': 'rss', 'category': 'tech'},
             {'name': 'Hacker News AI', 'url': 'https://hn.algolia.com/api/v1/search_by_date?tags=story&numericFilters=created_at_i>{}&query=AI', 'type': 'hn_api', 'category': 'community'},
             {'name': '机器之心', 'url': 'https://www.jiqizhixin.com/feed', 'type': 'rss', 'category': 'cn_ai'},
             {'name': '量子位', 'url': 'https://www.qbitai.com/feed', 'type': 'rss', 'category': 'cn_ai'},
         ]
         
-        # 更新：多方面事实新闻源
-        # 注意：RSSHub (rsshub.app) 在 GitHub Actions 环境中可能不稳定，返回 403/404
-        # 已替换为更稳定的直接 RSS 源
+        # 多方面事实新闻源
+        # 注意：所有 RSS 源已验证可用，替换了不稳定的 rsshub.app
         self.fact_news_sources = [
-            # 国内新闻（使用官方 RSS，更稳定）
-            {'name': '人民日报', 'url': 'http://www.people.com.cn/rss/politics.xml', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
-            {'name': '新华网', 'url': 'https://www.news.cn/rss/xhs.xml', 'type': 'rss', 'category': 'china', 'lang': 'zh'},  # 新华网官方 RSS
-            {'name': '澎湃新闻', 'url': 'https://www.thepaper.cn/rss', 'type': 'rss', 'category': 'china', 'lang': 'zh'},  # 澎湃官方 RSS
-            {'name': '腾讯新闻', 'url': 'https://www.qq.com/rss/news.xml', 'type': 'rss', 'category': 'china', 'lang': 'zh'},  # 腾讯 RSS
-            {'name': '凤凰网', 'url': 'http://www.ifeng.com/rss/news.xml', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
+            # 国内新闻（已验证可用的官方 RSS）
+            {'name': '人民网', 'url': 'http://www.people.com.cn/rss/politics.xml', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
+            {'name': '中国新闻网', 'url': 'https://www.chinanews.com.cn/rss/scroll-news.xml', 'type': 'rss', 'category': 'china', 'lang': 'zh'},  # 替代新华网
+            {'name': '澎湃新闻', 'url': 'https://www.thepaper.cn/rss', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
+            {'name': '凤凰网资讯', 'url': 'https://news.ifeng.com/rss/index.xml', 'type': 'rss', 'category': 'china', 'lang': 'zh'},  # 修复 URL
             # 国际新闻（稳定 RSS）
-            {'name': '联合早报', 'url': 'https://www.zaobao.com.sg/news/china/rss', 'type': 'rss', 'category': 'asia', 'lang': 'zh'},
+            {'name': '联合早报', 'url': 'https://www.zaobao.com.sg/rss/realtime/china', 'type': 'rss', 'category': 'asia', 'lang': 'zh'},  # 更新 URL
             {'name': 'BBC中文', 'url': 'https://feeds.bbci.co.uk/zhongwen/simp/rss.xml', 'type': 'rss', 'category': 'world', 'lang': 'zh'},
-            {'name': 'Reuters China', 'url': 'https://www.reutersagency.com/feed/?taxonomy=best-topics&post_type=best', 'type': 'rss', 'category': 'world', 'lang': 'zh'},
-            {'name': '纽约时报中文', 'url': 'https://cn.nytimes.com/rss.html', 'type': 'rss', 'category': 'world', 'lang': 'zh'},
+            {'name': 'FT中文网', 'url': 'https://www.ftchinese.com/rss/news', 'type': 'rss', 'category': 'world', 'lang': 'zh'},  # 替代路透社
+            {'name': '纽约时报中文', 'url': 'https://cn.nytimes.com/rss/', 'type': 'rss', 'category': 'world', 'lang': 'zh'},  # 修复 URL
             # TechCrunch AI - HTML解析
             {'name': 'TechCrunch AI', 'url': 'https://techcrunch.com/category/artificial-intelligence/', 'type': 'html', 'category': 'tech', 'lang': 'en'},
-            # ... 其他
         ]
         
         self.all_articles = []
@@ -236,16 +233,35 @@ class EnhancedNewsAnalyzer:
                 'summary': f"{summary} (未翻译)" if summary else "(未翻译)"
             }
     
-    # ==================== 原有AI新闻抓取方法（保持不变） ====================
+    # ==================== 原有AI新闻抓取方法 ====================
     def fetch_arxiv(self, source):
-        """抓取Arxiv AI论文"""
-        try:
-            response = requests.get(source['url'], headers=self._get_headers(source['url']), timeout=15)
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.text, 'html.parser')
+        """抓取Arxiv AI论文（带重试机制）"""
+        max_retries = 3
+        base_delay = 3
+        
+        for attempt in range(max_retries):
+            try:
+                response = requests.get(source['url'], headers=self._get_headers(source['url']), timeout=20)
+                
+                if response.status_code != 200:
+                    print(f"  ⚠️  {source['name']} HTTP {response.status_code}")
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (attempt + 1)
+                        print(f"     等待 {delay} 秒后重试第 {attempt + 2} 次...")
+                        time.sleep(delay)
+                        continue
+                    return
+                
+                response.encoding = 'utf-8'
+                soup = BeautifulSoup(response.text, 'lxml' if 'lxml' in __import__('bs4').features else 'html.parser')
                 dt_list = soup.find_all('dt')
                 dd_list = soup.find_all('dd')
                 
+                if not dt_list:
+                    print(f"  ⚠️  {source['name']} 未找到论文条目")
+                    return
+                
+                count = 0
                 for i, (dt, dd) in enumerate(zip(dt_list[:8], dd_list[:8])):
                     paper_id_elem = dt.find('a', title='Abstract')
                     if not paper_id_elem:
@@ -272,17 +288,35 @@ class EnhancedNewsAnalyzer:
                             'importance': 9,
                             'time': datetime.now().strftime('%Y-%m-%d'),
                             'type': 'ai',
-                            'lang': 'en'  # 添加 lang 以支持翻译
+                            'lang': 'en'
                         }
-                        # 添加翻译
                         translated = self.baidu_translate(article['title'], article['summary'])
-                        # translated 现在总是返回字典，包含原始内容+标记
                         article['title_translated'] = translated['title']
                         article['summary_translated'] = translated['summary']
                         self.all_articles.append(article)
                         self.ai_articles.append(article)
-        except Exception as e:
-            print(f"⚠️ Arxiv抓取失败: {e}")
+                        count += 1
+                
+                print(f"  ✓ {source['name']} 抓取完成 ({count}篇)")
+                return  # 成功则退出
+                
+            except requests.exceptions.Timeout:
+                print(f"  ⚠️  {source['name']} 请求超时")
+                if attempt < max_retries - 1:
+                    delay = base_delay * (attempt + 1)
+                    print(f"     等待 {delay} 秒后重试第 {attempt + 2} 次...")
+                    time.sleep(delay)
+            except requests.exceptions.ConnectionError as e:
+                print(f"  ⚠️  {source['name']} 连接错误: {e}")
+                if attempt < max_retries - 1:
+                    delay = base_delay * (attempt + 1)
+                    print(f"     等待 {delay} 秒后重试第 {attempt + 2} 次...")
+                    time.sleep(delay)
+            except Exception as e:
+                print(f"  ⚠️  {source['name']} 抓取失败: {e}")
+                import traceback
+                print(f"     堆栈: {traceback.format_exc()}")
+                return  # 未知错误不重试
     
     async def fetch_rss_async(self, session, source, article_type='ai'):
         """异步RSS抓取方法"""
@@ -519,9 +553,13 @@ class EnhancedNewsAnalyzer:
                 # 成功获取内容
                 feed = feedparser.parse(response.text)
                 
+                # 检查 XML 解析错误
+                if feed.bozo:
+                    print(f"  ⚠️  {source['name']} XML 解析警告: {feed.get('bozo_exception', '未知解析错误')}")
+                
                 # 检查是否真的有内容
                 if not feed.entries:
-                    print(f"  ⚠️  {source['name']} 返回空内容")
+                    print(f"  ⚠️  {source['name']} 返回空内容 (可能 RSS 源已变更或暂时不可用)")
                     return 0
                 
                 articles_added = 0
@@ -606,28 +644,33 @@ class EnhancedNewsAnalyzer:
                 return articles_added
                 
             except requests.exceptions.Timeout:
-                print(f"  ⚠️  {source['name']} 请求超时")
+                print(f"  ⚠️  {source['name']} 请求超时 (timeout=20s)")
                 if attempt < max_retries - 1:
                     delay = base_delay * (attempt + 1) + random.uniform(0, 1)
                     print(f"     等待 {delay:.1f} 秒后重试第 {attempt + 2} 次...")
                     time.sleep(delay)
                     continue
+                print(f"  ❌ {source['name']} 所有重试均失败 (超时)")
                 return 0
-            except requests.exceptions.ConnectionError:
-                print(f"  ⚠️  {source['name']} 连接错误")
+            except requests.exceptions.ConnectionError as e:
+                print(f"  ⚠️  {source['name']} 连接错误: {str(e)[:80]}")
                 if attempt < max_retries - 1:
                     delay = base_delay * (attempt + 1) + random.uniform(0, 1)
                     print(f"     等待 {delay:.1f} 秒后重试第 {attempt + 2} 次...")
                     time.sleep(delay)
                     continue
+                print(f"  ❌ {source['name']} 所有重试均失败 (连接错误)")
                 return 0
             except Exception as e:
-                print(f"  ⚠️  {source['name']} 抓取出错: {e}")
+                error_type = type(e).__name__
+                error_msg = str(e)[:100]
+                print(f"  ⚠️  {source['name']} 未知错误 [{error_type}]: {error_msg}")
                 if attempt < max_retries - 1:
                     delay = base_delay * (attempt + 1) + random.uniform(0, 1)
                     print(f"     等待 {delay:.1f} 秒后重试第 {attempt + 2} 次...")
                     time.sleep(delay)
                     continue
+                print(f"  ❌ {source['name']} 所有重试均失败")
                 return 0
         
         return 0  # 所有重试都失败
@@ -647,21 +690,22 @@ class EnhancedNewsAnalyzer:
                 if article_type == 'fact' and 'query=AI' in url:
                     url = url.replace('&query=AI', '')
                 
-                # 使用更真实的请求头
-                headers = {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                # 使用随机请求头
+                headers = self._get_headers(url)
+                headers.update({
                     'Accept': 'application/json, text/plain, */*',
                     'Accept-Language': 'en-US,en;q=0.9',
-                }
+                })
                 
-                response = requests.get(url, headers=headers, timeout=15)
+                response = requests.get(url, headers=headers, timeout=20)
                 
                 if response.status_code != 200:
                     print(f"  ⚠️  {source['name']} HTTP {response.status_code}")
                     if attempt < max_retries - 1:
-                        print(f"     尝试第 {attempt + 2} 次...")
+                        print(f"     等待 {retry_delay} 秒后尝试第 {attempt + 2} 次...")
                         time.sleep(retry_delay)
                         continue
+                    print(f"  ❌ {source['name']} 所有重试均失败 (HTTP {response.status_code})")
                     return 0
                 
                 hits = response.json().get('hits', [])
