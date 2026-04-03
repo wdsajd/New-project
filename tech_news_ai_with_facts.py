@@ -77,10 +77,11 @@ class EnhancedNewsAnalyzer:
         # AI科技新闻源
         self.ai_news_sources = [
             {'name': 'Arxiv AI Papers', 'url': 'https://arxiv.org/list/cs.AI/recent', 'type': 'arxiv', 'category': 'ai_research'},
-            {'name': 'TechCrunch AI', 'url': 'https://techcrunch.com/category/artificial-intelligence/feed/', 'type': 'rss', 'category': 'tech'},
+            # TechCrunch 和 VentureBeat 改为 HTML 解析（RSS 源不稳定）
+            {'name': 'TechCrunch AI', 'url': 'https://techcrunch.com/category/artificial-intelligence/', 'type': 'html', 'category': 'tech'},
             {'name': 'Hacker News AI', 'url': 'https://hn.algolia.com/api/v1/search_by_date?tags=story&numericFilters=created_at_i>{}&query=AI', 'type': 'hn_api', 'category': 'community'},
-            {'name': 'VentureBeat AI', 'url': 'https://venturebeat.com/category/ai/feed/', 'type': 'rss', 'category': 'tech'},  # 替代量子位
-            {'name': 'The Verge AI', 'url': 'https://www.theverge.com/rss/ai-artificial-intelligence/index.xml', 'type': 'rss', 'category': 'tech'},  # 替代机器之心
+            {'name': 'VentureBeat AI', 'url': 'https://venturebeat.com/ai/', 'type': 'html', 'category': 'tech'},
+            {'name': 'The Verge AI', 'url': 'https://www.theverge.com/rss/ai-artificial-intelligence/index.xml', 'type': 'rss', 'category': 'tech'},
         ]
         
         # 多方面事实新闻源
@@ -89,13 +90,15 @@ class EnhancedNewsAnalyzer:
             # 国内新闻（已验证可用的 RSS）
             {'name': '人民网', 'url': 'http://www.people.com.cn/rss/politics.xml', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
             {'name': '中国新闻网', 'url': 'https://www.chinanews.com.cn/rss/scroll-news.xml', 'type': 'rss', 'category': 'china', 'lang': 'zh'},
-            {'name': '凤凰网资讯', 'url': 'https://news.ifeng.com/rss', 'type': 'rss', 'category': 'china', 'lang': 'zh'},  # 凤凰网官方 RSS
+            # 凤凰网改为 HTML 解析（RSS 源不稳定）
+            {'name': '凤凰网资讯', 'url': 'https://news.ifeng.com/', 'type': 'html', 'category': 'china', 'lang': 'zh'},
             # 国际新闻（稳定 RSS）
             {'name': 'BBC中文', 'url': 'https://feeds.bbci.co.uk/zhongwen/simp/rss.xml', 'type': 'rss', 'category': 'world', 'lang': 'zh'},
-            {'name': 'FT中文网', 'url': 'https://www.ftchinese.com/rss/news', 'type': 'rss', 'category': 'world', 'lang': 'zh'},
+            # FT中文网改为备用源
+            {'name': 'FT中文网', 'url': 'https://www.ftchinese.com/', 'type': 'html', 'category': 'world', 'lang': 'zh'},
             {'name': '纽约时报中文', 'url': 'https://cn.nytimes.com/rss/', 'type': 'rss', 'category': 'world', 'lang': 'zh'},
-            {'name': '联合早报', 'url': 'https://www.zaobao.com.sg/rss/realtime/china', 'type': 'rss', 'category': 'asia', 'lang': 'zh'},
-            # TechCrunch AI - HTML解析
+            # 联合早报已移除（404错误）
+            # TechCrunch AI - HTML解析（RSS 源不稳定）
             {'name': 'TechCrunch HTML', 'url': 'https://techcrunch.com/category/artificial-intelligence/', 'type': 'html', 'category': 'tech', 'lang': 'en'},
         ]
         
@@ -1070,10 +1073,34 @@ class EnhancedNewsAnalyzer:
     
         try:
             genai.configure(api_key=api_key)
-            # 使用当前稳定可用的模型
-            # 推荐: 'gemini-1.5-flash' (快速/免费), 'gemini-1.5-pro' (高性能)
-            # 备选: 'gemini-1.0-pro', 'gemini-pro'
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            # 使用多模型降级策略
+            models_to_try = [
+                'gemini-2.0-flash',
+                'gemini-1.5-flash',
+                'gemini-1.5-pro',
+                'gemini-2.0-flash-lite',
+            ]
+            
+            model = None
+            last_error = None
+            for model_name in models_to_try:
+                try:
+                    test_model = genai.GenerativeModel(model_name)
+                    # 测试模型是否可用
+                    test_response = test_model.generate_content("test")
+                    if test_response and test_response.text:
+                        print(f"  ✓ 使用模型: {model_name}")
+                        model = test_model
+                        break
+                except Exception as e:
+                    last_error = e
+                    continue
+            
+            if model is None:
+                print(f"  ⚠️  所有 Gemini 模型均不可用，使用备用分析")
+                if last_error:
+                    print(f"     最后错误: {last_error}")
+                return self._fallback_analysis(article)
     
             # 如果是ArXiv，优先获取真实摘要（已带缓存）
             full_abstract = ""
