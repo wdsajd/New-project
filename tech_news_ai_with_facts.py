@@ -12,12 +12,13 @@ import hashlib
 from datetime import datetime, timedelta
 import time
 from bs4 import BeautifulSoup
-import feedparser
 from urllib.parse import urljoin
 from collections import Counter
 import random  # 用于生成 salt
 import google.generativeai as genai
-from bs4 import BeautifulSoup
+
+# 导入新闻抓取模块
+from news_fetcher import NewsFetcher, AsyncNewsFetcher
 
 # 尝试导入 fake_useragent（可选）
 try:
@@ -50,13 +51,8 @@ class EnhancedNewsAnalyzer:
         self.gemini_api_key = os.getenv('GEMINI_API_KEY')
         self.forty_eight_hours_ago = datetime.now() - timedelta(hours=48)
         
-        # 摘要缓存字典（避免重复请求同一篇论文）
-        self.abstract_cache = {}
-        
-        # 请求频率控制
-        self.domain_delays = {}  # 记录每个域名的上次请求时间
-        self.min_delay_between_requests = 2  # 最小请求间隔（秒）
-        self.max_concurrent_requests = 3  # 最大并发请求数
+        # 初始化新闻抓取器（传入百度翻译函数）
+        self.news_fetcher = NewsFetcher(baidu_translate_func=self.baidu_translate)
         
         # 防御性检查：API密钥配置提醒
         if not self.gemini_api_key:
@@ -235,270 +231,34 @@ class EnhancedNewsAnalyzer:
                 'summary': f"{summary} (未翻译)" if summary else "(未翻译)"
             }
     
-    # ==================== 原有AI新闻抓取方法 ====================
+    # ==================== 新闻抓取方法（已迁移到 news_fetcher.py）====================
     def fetch_arxiv(self, source):
-        """抓取Arxiv AI论文（带重试机制）"""
-        max_retries = 3
-        base_delay = 3
-        
-        for attempt in range(max_retries):
-            try:
-                response = requests.get(source['url'], headers=self._get_headers(source['url']), timeout=20)
-                
-                if response.status_code != 200:
-                    print(f"  ⚠️  {source['name']} HTTP {response.status_code}")
-                    if attempt < max_retries - 1:
-                        delay = base_delay * (attempt + 1)
-                        print(f"     等待 {delay} 秒后重试第 {attempt + 2} 次...")
-                        time.sleep(delay)
-                        continue
-                    return
-                
-                response.encoding = 'utf-8'
-                
-                # 尝试多种解析器
-                try:
-                    soup = BeautifulSoup(response.text, 'lxml')
-                except:
-                    soup = BeautifulSoup(response.text, 'html.parser')
-                
-                dt_list = soup.find_all('dt')
-                dd_list = soup.find_all('dd')
-                
-                if not dt_list:
-                    print(f"  ⚠️  {source['name']} 未找到 <dt> 元素，尝试备用选择器...")
-                    dl = soup.find('dl')
-                    if dl:
-                        dt_list = dl.find_all('dt')
-                        dd_list = dl.find_all('dd')
-                    
-                    if not dt_list:
-                        print(f"  ❌ {source['name']} 页面结构已变更")
-                        return
-                
-                count = 0
-                for i, (dt, dd) in enumerate(zip(dt_list[:10], dd_list[:10])):
-                    # 从链接 href 提取论文 ID
-                    paper_id = None
-                    link_elem = dt.find('a')
-                    if link_elem and 'href' in link_elem:
-                        href = link_elem['href']
-                        if '/abs/' in href:
-                            paper_id = href.split('/abs/')[-1].strip('/')
-                        elif '/html/' in href:
-                            paper_id = href.split('/html/')[-1].split('/')[0]
-                    
-                    if not paper_id:
-                        continue
-                    
-                    title_elem = dd.find('div', class_='list-title')
-                    authors_elem = dd.find('div', class_='list-authors')
-                    abstract_elem = dd.find('p', class_='abstract') or dd.find('p')
-                    
-                    if title_elem:
-                        title = title_elem.get_text().replace('Title:', '').strip()
-                        authors = authors_elem.get_text().replace('Authors:', '').strip() if authors_elem else ''
-                        abstract = abstract_elem.get_text().strip() if abstract_elem else ''
-                        
-                        article = {
-                            'id': f"arxiv_{paper_id}",
-                            'title': f"[论文] {title[:120]}",
-                            'link': f'https://arxiv.org/abs/{paper_id}',
-                            'source': source['name'],
-                            'summary': abstract[:250] + '...' if len(abstract) > 250 else abstract,
-                            'authors': authors,
-                            'category': 'research',
-                            'importance': 9,
-                            'time': datetime.now().strftime('%Y-%m-%d %H:%M'),  # 统一时间格式
-                            'type': 'ai',
-                            'lang': 'en'
-                        }
-                        translated = self.baidu_translate(article['title'], article['summary'])
-                        article['title_translated'] = translated['title']
-                        article['summary_translated'] = translated['summary']
-                        self.all_articles.append(article)
-                        self.ai_articles.append(article)
-                        count += 1
-                
-                if count > 0:
-                    print(f"  ✓ {source['name']} 抓取完成 ({count}篇)")
-                else:
-                    print(f"  ⚠️  {source['name']} 未提取到任何论文")
-                return  # 成功则退出
-                
-            except requests.exceptions.Timeout:
-                print(f"  ⚠️  {source['name']} 请求超时")
-                if attempt < max_retries - 1:
-                    delay = base_delay * (attempt + 1)
-                    print(f"     等待 {delay} 秒后重试第 {attempt + 2} 次...")
-                    time.sleep(delay)
-            except requests.exceptions.ConnectionError as e:
-                print(f"  ⚠️  {source['name']} 连接错误: {e}")
-                if attempt < max_retries - 1:
-                    delay = base_delay * (attempt + 1)
-                    print(f"     等待 {delay} 秒后重试第 {attempt + 2} 次...")
-                    time.sleep(delay)
-            except Exception as e:
-                print(f"  ⚠️  {source['name']} 抓取失败: {e}")
-                import traceback
-                print(f"     堆栈: {traceback.format_exc()}")
-                return  # 未知错误不重试
+        """抓取Arxiv AI论文（委托给 news_fetcher 模块）"""
+        articles = self.news_fetcher.fetch_arxiv(source)
+        self.all_articles.extend(articles)
+        self.ai_articles.extend(articles)
+        return len(articles)
     
     async def fetch_rss_async(self, session, source, article_type='ai'):
-        """异步RSS抓取方法"""
+        """异步RSS抓取方法（委托给 news_fetcher 模块）"""
         if not ASYNC_AVAILABLE:
             raise RuntimeError("异步功能不可用：请先安装 aiohttp (pip install aiohttp)")
         
-        try:
-            async with session.get(source['url'], timeout=aiohttp.ClientTimeout(total=15)) as response:
-                if response.status == 200:
-                    text = await response.text()
-                    feed = feedparser.parse(text)
-                    articles_added = 0
-                    seen_links = set()
-                    
-                    for entry in feed.entries[:20]:
-                        if articles_added >= 5:
-                            break
-                        
-                        # 检查发布时间
-                        pub_time = None
-                        if hasattr(entry, 'published_parsed'):
-                            pub_time = datetime(*entry.published_parsed[:6])
-                        elif hasattr(entry, 'updated_parsed'):
-                            pub_time = datetime(*entry.updated_parsed[:6])
-                        
-                        if not pub_time:
-                            pub_time = datetime.now()
-                            article_importance = 4
-                        
-                        if pub_time < self.forty_eight_hours_ago:
-                            continue
-                        
-                        title = entry.get('title', '').strip()
-                        summary = entry.get('summary', '').strip()
-                        link = entry.get('link', '').strip()
-                        
-                        link_hash = hashlib.md5(link.encode()).hexdigest()
-                        if link_hash in seen_links:
-                            continue
-                        seen_links.add(link_hash)
-                        
-                        if summary:
-                            soup = BeautifulSoup(summary, 'html.parser')
-                            summary = soup.get_text()[:250]
-                        
-                        article = {
-                            'id': link_hash[:8],
-                            'title': title[:150],
-                            'link': link,
-                            'source': source['name'],
-                            'summary': summary[:250] + '...' if len(summary) > 250 else summary,
-                            'category': source.get('category', 'general'),
-                            'lang': source.get('lang', 'en'),
-                            'importance': 6,
-                            'time': pub_time.strftime('%Y-%m-%d %H:%M'),
-                            'type': article_type
-                        }
-                        
-                        if article['lang'] == 'en':
-                            translated = self.baidu_translate(title, summary)
-                            article['title_translated'] = translated['title']
-                            article['summary_translated'] = translated['summary']
-                        
-                        if article_type == 'ai':
-                            content = f"{title} {summary}".lower()
-                            ai_keywords = ['ai', 'artificial intelligence', 'machine learning', 
-                                      'deep learning', 'neural network', 'llm', 'gpt', 'transformer',
-                                      '人工智能', '机器学习', '深度学习', '大模型', '生成式AI', '计算机视觉', '图像生成','训练',
-                                      'AIGC', 'Diffusion模型', 'MoE模型', 'RLHF']
-                            
-                            is_ai_related = any(keyword in content for keyword in ai_keywords)
-                            if is_ai_related:
-                                article['importance'] = 8
-                                self.all_articles.append(article)
-                                self.ai_articles.append(article)
-                                articles_added += 1
-                        else:
-                            if link_hash not in [a['id'] for a in self.fact_articles]:
-                                self.all_articles.append(article)
-                                self.fact_articles.append(article)
-                                articles_added += 1
-                    
-                    print(f"  ✓ {source['name']} 抓取完成 ({articles_added}篇)")
-                    return articles_added
-                else:
-                    print(f"  ❌ {source['name']} HTTP {response.status}")
-                    return 0
-        except Exception as e:
-            print(f"  ❌ {source['name']} 抓取出错: {e}")
-            return 0
+        async_fetcher = AsyncNewsFetcher(baidu_translate_func=self.baidu_translate)
+        articles = await async_fetcher.fetch_rss_async(session, source, article_type)
+        
+        self.all_articles.extend(articles)
+        if article_type == 'ai':
+            self.ai_articles.extend(articles)
+        else:
+            self.fact_articles.extend(articles)
+        
+        return len(articles)
     
     async def fetch_hackernews_async(self, session, source, article_type='ai'):
-        """异步Hacker News抓取方法"""
-        if not ASYNC_AVAILABLE:
-            raise RuntimeError("异步功能不可用：请先安装 aiohttp (pip install aiohttp)")
-        
-        try:
-            timestamp = int(self.forty_eight_hours_ago.timestamp())
-            query_param = source['url'].format(timestamp)
-            url = query_param
-            
-            if article_type == 'fact' and 'query=AI' in url:
-                url = url.replace('&query=AI', '')
-            
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    hits = data.get('hits', [])
-                    seen_links = set()
-                    count = 0
-                    
-                    for hit in hits[:10]:
-                        link = hit.get('url', f"https://news.ycombinator.com/item?id={hit.get('objectID')}")
-                        link_hash = hashlib.md5(link.encode()).hexdigest()
-                        if link_hash in seen_links:
-                            continue
-                        seen_links.add(link_hash)
-                        
-                        title = hit.get('title', '')
-                        
-                        if article_type == 'ai' and not any(keyword in title.lower() for keyword in ['ai', 'llm', 'gpt', 'openai', 'anthropic']):
-                            continue
-                        
-                        article = {
-                            'id': f"hn_{hit.get('objectID', '')}",
-                            'title': title,
-                            'link': link,
-                            'source': source['name'],
-                            'points': hit.get('points', 0),
-                            'comments': hit.get('num_comments', 0),
-                            'category': source.get('category', 'tech'),
-                            'importance': min(9, 6 + (hit.get('points', 0) // 20)),
-                            'time': datetime.fromtimestamp(hit.get('created_at_i', 0)).strftime('%Y-%m-%d %H:%M'),
-                            'type': article_type,
-                            'lang': source.get('lang', 'en')
-                        }
-                        
-                        if article['lang'] == 'en':
-                            translated = self.baidu_translate(title, '')
-                            article['title_translated'] = translated['title']
-                        
-                        self.all_articles.append(article)
-                        if article_type == 'ai':
-                            self.ai_articles.append(article)
-                        else:
-                            self.fact_articles.append(article)
-                        count += 1
-                    
-                    print(f"  ✓ {source['name']} 抓取完成 ({count}篇)")
-                    return count
-                else:
-                    print(f"  ❌ {source['name']} HTTP {response.status}")
-                    return 0
-        except Exception as e:
-            print(f"  ❌ {source['name']} 抓取出错: {e}")
-            return 0
+        """异步Hacker News抓取方法（委托给 news_fetcher 模块）"""
+        # 异步 HN 抓取暂未实现，使用同步版本
+        return self.fetch_hackernews(source, article_type)
 
     # ==================== 新增：抓取事实新闻 ====================
     def fetch_fact_news(self):
@@ -508,12 +268,10 @@ class EnhancedNewsAnalyzer:
         for source in self.fact_news_sources:
             print(f"  → {source['name']}")
             try:
-                if source['type'] == 'rss':
-                    self.fetch_rss(source, article_type='fact')
-                elif source['type'] == 'hn_api':
-                    self.fetch_hackernews(source, article_type='fact')
-                elif source['type'] == 'html':
-                    self.fetch_html(source, article_type='fact')
+                # 使用新闻抓取模块
+                articles = self.news_fetcher.fetch_from_source(source, article_type='fact')
+                self.all_articles.extend(articles)
+                self.fact_articles.extend(articles)
                 time.sleep(1)  # 礼貌延迟
             except Exception as e:
                 print(f"    ❌ 抓取失败: {e}")
@@ -534,486 +292,36 @@ class EnhancedNewsAnalyzer:
             reverse=True
         )[:10]
     
-    # ==================== 原有AI分析功能（保持不变） ====================
+    # ==================== 新闻抓取方法（已迁移到 news_fetcher.py）====================
     def fetch_rss(self, source, article_type='ai'):
-        """通用RSS抓取方法（同步版本，带重试机制和频率控制）"""
-        max_retries = 3
-        base_delay = 2  # 基础延迟
-        
-        # 频率控制
-        self._wait_if_needed(source['url'])
-        
-        for attempt in range(max_retries):
-            try:
-                import requests
-                # 使用新的随机请求头生成方法
-                headers = self._get_headers(source['url'])
-                
-                # 使用 Session 保持连接
-                session = requests.Session()
-                response = session.get(source['url'], headers=headers, timeout=25)
-                
-                # 检查响应状态
-                if response.status_code == 404:
-                    print(f"  ⚠️  {source['name']} 页面不存在 (404) - URL已变更")
-                    return 0
-                elif response.status_code == 403:
-                    print(f"  ⚠️  {source['name']} 访问被拒绝 (403) - 反爬虫限制")
-                    if attempt < max_retries - 1:
-                        delay = base_delay * (2 ** attempt) + random.uniform(0, 3)
-                        print(f"     更换 UA，等待 {delay:.1f} 秒后重试第 {attempt + 2} 次...")
-                        time.sleep(delay)
-                        continue
-                    print(f"  ❌ {source['name']} 所有重试均失败 (403)")
-                    return 0
-                elif response.status_code != 200:
-                    print(f"  ⚠️  {source['name']} HTTP {response.status_code}")
-                    if attempt < max_retries - 1:
-                        delay = base_delay * (attempt + 1) + random.uniform(0, 1)
-                        print(f"     等待 {delay:.1f} 秒后重试第 {attempt + 2} 次...")
-                        time.sleep(delay)
-                        continue
-                    print(f"  ❌ {source['name']} 所有重试均失败 (HTTP {response.status_code})")
-                    return 0
-                
-                # 设置正确的编码（中文 RSS 源通常为 UTF-8 或 GBK）
-                # 优先使用响应头中的编码，其次是 apparent_encoding
-                if response.headers.get('content-type') and 'charset=' in response.headers['content-type']:
-                    pass  # requests 已自动处理
-                elif response.apparent_encoding:
-                    # 对于中文网站，尝试多种编码
-                    apparent = response.apparent_encoding.lower()
-                    if 'gb' in apparent or 'gbk' in apparent or 'gb2312' in apparent:
-                        try:
-                            response.encoding = 'gbk'
-                        except:
-                            response.encoding = 'utf-8'
-                    else:
-                        response.encoding = 'utf-8'
-                elif 'zh' in source.get('lang', ''):
-                    response.encoding = 'utf-8'
-                
-                # 成功获取内容
-                feed = feedparser.parse(response.text)
-                
-                # 检查 XML 解析错误
-                if feed.bozo:
-                    bozo_msg = str(feed.get('bozo_exception', '未知解析错误'))[:100]
-                    print(f"  ⚠️  {source['name']} XML 解析警告: {bozo_msg}")
-                    # 如果解析错误，尝试备用解析
-                    if not feed.entries and attempt < max_retries - 1:
-                        print(f"     等待 2 秒后重试...")
-                        time.sleep(2)
-                        continue
-                
-                # 检查是否真的有内容
-                if not feed.entries:
-                    print(f"  ⚠️  {source['name']} 返回空内容 (RSS 源可能已变更)")
-                    return 0
-                
-                articles_added = 0
-                seen_links = set()
-                
-                for entry in feed.entries[:20]:
-                    if articles_added >= 5:
-                        break
-                        
-                    # 检查发布时间
-                    pub_time = None
-                    if hasattr(entry, 'published_parsed'):
-                        pub_time = datetime(*entry.published_parsed[:6])
-                    elif hasattr(entry, 'updated_parsed'):
-                        pub_time = datetime(*entry.updated_parsed[:6])
-                    
-                    if not pub_time:
-                        pub_time = datetime.now()
-                        article_importance = 4
-                    
-                    if pub_time < self.forty_eight_hours_ago:
-                        continue
-                    
-                    title = entry.get('title', '').strip()
-                    summary = entry.get('summary', '').strip()
-                    link = entry.get('link', '').strip()
-                    
-                    # 跳过空标题或链接
-                    if not title or not link:
-                        continue
-                        
-                    link_hash = hashlib.md5(link.encode()).hexdigest()
-                    if link_hash in seen_links:
-                        continue
-                    seen_links.add(link_hash)
-                    
-                    if summary:
-                        soup = BeautifulSoup(summary, 'html.parser')
-                        summary = soup.get_text()[:250]
-                    
-                    article = {
-                        'id': link_hash[:8],
-                        'title': title[:150],
-                        'link': link,
-                        'source': source['name'],
-                        'summary': summary[:250] + '...' if len(summary) > 250 else summary,
-                        'category': source.get('category', 'general'),
-                        'lang': source.get('lang', 'en'),
-                        'importance': 6,
-                        'time': pub_time.strftime('%Y-%m-%d %H:%M'),
-                        'type': article_type
-                    }
-                    
-                    if article['lang'] == 'en':
-                        translated = self.baidu_translate(title, summary)
-                        article['title_translated'] = translated['title']
-                        article['summary_translated'] = translated['summary']
-                    
-                    if article_type == 'ai':
-                        content = f"{title} {summary}".lower()
-                        ai_keywords = ['ai', 'artificial intelligence', 'machine learning', 
-                                  'deep learning', 'neural network', 'llm', 'gpt', 'transformer',
-                                  '人工智能', '机器学习', '深度学习', '大模型', '生成式AI', '计算机视觉', '图像生成','训练',
-                                  'AIGC', 'Diffusion模型', 'MoE模型', 'RLHF']
-                        
-                        is_ai_related = any(keyword in content for keyword in ai_keywords)
-                        if is_ai_related:
-                            article['importance'] = 8
-                            self.all_articles.append(article)
-                            self.ai_articles.append(article)
-                            articles_added += 1
-                    else:
-                        if link_hash not in [a['id'] for a in self.fact_articles]:
-                            self.all_articles.append(article)
-                            self.fact_articles.append(article)
-                            articles_added += 1
-                
-                if articles_added > 0:
-                    print(f"  ✓ {source['name']} 抓取完成 ({articles_added}篇)")
-                else:
-                    print(f"  ⚠️  {source['name']} 无新内容 (过去48小时内)")
-                return articles_added
-                
-            except requests.exceptions.Timeout:
-                print(f"  ⚠️  {source['name']} 请求超时 (timeout=20s)")
-                if attempt < max_retries - 1:
-                    delay = base_delay * (attempt + 1) + random.uniform(0, 1)
-                    print(f"     等待 {delay:.1f} 秒后重试第 {attempt + 2} 次...")
-                    time.sleep(delay)
-                    continue
-                print(f"  ❌ {source['name']} 所有重试均失败 (超时)")
-                return 0
-            except requests.exceptions.ConnectionError as e:
-                print(f"  ⚠️  {source['name']} 连接错误: {str(e)[:80]}")
-                if attempt < max_retries - 1:
-                    delay = base_delay * (attempt + 1) + random.uniform(0, 1)
-                    print(f"     等待 {delay:.1f} 秒后重试第 {attempt + 2} 次...")
-                    time.sleep(delay)
-                    continue
-                print(f"  ❌ {source['name']} 所有重试均失败 (连接错误)")
-                return 0
-            except Exception as e:
-                error_type = type(e).__name__
-                error_msg = str(e)[:100]
-                print(f"  ⚠️  {source['name']} 未知错误 [{error_type}]: {error_msg}")
-                if attempt < max_retries - 1:
-                    delay = base_delay * (attempt + 1) + random.uniform(0, 1)
-                    print(f"     等待 {delay:.1f} 秒后重试第 {attempt + 2} 次...")
-                    time.sleep(delay)
-                    continue
-                print(f"  ❌ {source['name']} 所有重试均失败")
-                return 0
-        
-        return 0  # 所有重试都失败
+        """通用RSS抓取方法（委托给 news_fetcher 模块）"""
+        articles = self.news_fetcher.fetch_rss(source, article_type)
+        self.all_articles.extend(articles)
+        if article_type == 'ai':
+            self.ai_articles.extend(articles)
+        else:
+            self.fact_articles.extend(articles)
+        return len(articles)
     
     def fetch_hackernews(self, source, article_type='ai'):
-        """通用Hacker News抓取方法（同步版本，带重试机制）"""
-        max_retries = 3
-        retry_delay = 2
-        
-        for attempt in range(max_retries):
-            try:
-                import requests
-                timestamp = int(self.forty_eight_hours_ago.timestamp())
-                query_param = source['url'].format(timestamp)
-                url = query_param
-                
-                if article_type == 'fact' and 'query=AI' in url:
-                    url = url.replace('&query=AI', '')
-                
-                # 使用随机请求头
-                headers = self._get_headers(url)
-                headers.update({
-                    'Accept': 'application/json, text/plain, */*',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                })
-                
-                response = requests.get(url, headers=headers, timeout=20)
-                
-                if response.status_code != 200:
-                    print(f"  ⚠️  {source['name']} HTTP {response.status_code}")
-                    if attempt < max_retries - 1:
-                        print(f"     等待 {retry_delay} 秒后尝试第 {attempt + 2} 次...")
-                        time.sleep(retry_delay)
-                        continue
-                    print(f"  ❌ {source['name']} 所有重试均失败 (HTTP {response.status_code})")
-                    return 0
-                
-                hits = response.json().get('hits', [])
-                seen_links = set()
-                count = 0
-                
-                for hit in hits[:10]:
-                    link = hit.get('url', f"https://news.ycombinator.com/item?id={hit.get('objectID')}")
-                    link_hash = hashlib.md5(link.encode()).hexdigest()
-                    if link_hash in seen_links:
-                        continue
-                    seen_links.add(link_hash)
-                    
-                    title = hit.get('title', '')
-                    
-                    if article_type == 'ai' and not any(keyword in title.lower() for keyword in ['ai', 'llm', 'gpt', 'openai', 'anthropic']):
-                        continue
-                    
-                    article = {
-                        'id': f"hn_{hit.get('objectID', '')}",
-                        'title': title,
-                        'link': link,
-                        'source': source['name'],
-                        'points': hit.get('points', 0),
-                        'comments': hit.get('num_comments', 0),
-                        'category': source.get('category', 'tech'),
-                        'importance': min(9, 6 + (hit.get('points', 0) // 20)),
-                        'time': datetime.fromtimestamp(hit.get('created_at_i', 0)).strftime('%Y-%m-%d %H:%M'),
-                        'type': article_type,
-                        'lang': source.get('lang', 'en')
-                    }
-                    
-                    if article['lang'] == 'en':
-                        translated = self.baidu_translate(title, '')
-                        article['title_translated'] = translated['title']
-                    
-                    self.all_articles.append(article)
-                    if article_type == 'ai':
-                        self.ai_articles.append(article)
-                    else:
-                        self.fact_articles.append(article)
-                    count += 1
-                
-                if count > 0:
-                    print(f"  ✓ {source['name']} 抓取完成 ({count}篇)")
-                else:
-                    print(f"  ⚠️  {source['name']} 无符合条件的内容")
-                return count
-                
-            except requests.exceptions.Timeout:
-                print(f"  ⚠️  {source['name']} 请求超时")
-                if attempt < max_retries - 1:
-                    print(f"     尝试第 {attempt + 2} 次...")
-                    time.sleep(retry_delay)
-                    continue
-                return 0
-            except requests.exceptions.ConnectionError:
-                print(f"  ⚠️  {source['name']} 连接错误")
-                if attempt < max_retries - 1:
-                    print(f"     尝试第 {attempt + 2} 次...")
-                    time.sleep(retry_delay)
-                    continue
-                return 0
-            except Exception as e:
-                print(f"  ⚠️  {source['name']} 抓取出错: {e}")
-                if attempt < max_retries - 1:
-                    print(f"     尝试第 {attempt + 2} 次...")
-                    time.sleep(retry_delay)
-                    continue
-                return 0
-        
-        return 0
+        """通用Hacker News抓取方法（委托给 news_fetcher 模块）"""
+        articles = self.news_fetcher.fetch_hackernews(source, article_type)
+        self.all_articles.extend(articles)
+        if article_type == 'ai':
+            self.ai_articles.extend(articles)
+        else:
+            self.fact_articles.extend(articles)
+        return len(articles)
     
     def fetch_html(self, source, article_type='fact'):
-        """HTML页面解析方法，支持多种网站结构"""
-        max_retries = 2
-        for attempt in range(max_retries):
-            try:
-                # 频率控制
-                self._wait_if_needed(source['url'])
-                
-                # 使用更真实的请求头
-                headers = self._get_headers(source['url'])
-                headers.update({
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Accept-Encoding': 'gzip, deflate',
-                    'Connection': 'keep-alive',
-                    'Upgrade-Insecure-Requests': '1',
-                    'Sec-Fetch-Dest': 'document',
-                    'Sec-Fetch-Mode': 'navigate',
-                    'Sec-Fetch-Site': 'none',
-                    'Cache-Control': 'max-age=0',
-                    'Referer': 'https://www.google.com/'
-                })
-                
-                response = requests.get(source['url'], headers=headers, timeout=25)
-                
-                if response.status_code != 200:
-                    print(f"  ⚠️  {source['name']} HTTP {response.status_code}")
-                    if attempt < max_retries - 1:
-                        time.sleep(3)
-                        continue
-                    return 0
-                
-                response.encoding = response.apparent_encoding or 'utf-8'
-                
-                try:
-                    soup = BeautifulSoup(response.text, 'lxml')
-                except:
-                    soup = BeautifulSoup(response.text, 'html.parser')
-                
-                articles_added = 0
-                seen_links = set()
-                
-                # 多种选择器策略（按优先级）
-                selectors_to_try = [
-                    'article',
-                    'div.post-block',
-                    'div.post-card',
-                    'div.tease-card',
-                    'div.article-card',
-                    'div.entry-content',
-                    'div.content-card',
-                    'section.article',
-                ]
-                
-                article_items = []
-                for selector in selectors_to_try:
-                    article_items = soup.select(selector)
-                    if article_items:
-                        print(f"  → 使用选择器 '{selector}' 找到 {len(article_items)} 个元素")
-                        break
-                
-                # 备用：查找所有包含链接的标题元素
-                if not article_items:
-                    print(f"  → 未找到 article 元素，尝试 h2/h3 标题...")
-                    article_items = soup.find_all(['h2', 'h3'])
-                    print(f"  → 找到 {len(article_items)} 个标题元素")
-                
-                for item in article_items[:15]:  # 限制检查数量
-                    if articles_added >= 5:  # 每个源最多取5条
-                        break
-                    
-                    # 提取标题和链接
-                    title_elem = None
-                    link_elem = None
-                    
-                    # 尝试不同的HTML结构
-                    if item.name == 'article':
-                        # 标准article标签
-                        title_elem = item.find('h2') or item.find('h3') or item.find('h1')
-                        link_elem = item.find('a')
-                    elif item.name == 'h2':
-                        # 直接是h2标签
-                        title_elem = item
-                        link_elem = item.find('a')
-                    else:
-                        # 其他情况
-                        title_elem = item.find('h2') or item.find('h3') or item.find('h1')
-                        link_elem = item.find('a')
-                    
-                    if not title_elem or not link_elem:
-                        continue
-                    
-                    title = title_elem.get_text().strip()
-                    link = link_elem.get('href', '')
-                    
-                    # 处理相对链接
-                    if link and not link.startswith('http'):
-                        from urllib.parse import urljoin
-                        link = urljoin(source['url'], link)
-                    
-                    if not title or not link:
-                        continue
-                    
-                    # 去重检查
-                    link_hash = hashlib.md5(link.encode()).hexdigest()
-                    if link_hash in seen_links:
-                        continue
-                    seen_links.add(link_hash)
-                    
-                    # 检查是否为AI相关（对于fact类型的文章可以放宽限制）
-                    if article_type == 'ai':
-                        content = title.lower()
-                        ai_keywords = ['ai', 'artificial intelligence', 'machine learning', 'deep learning', 'neural network', 'llm', 'gpt', 'transformer']
-                        is_ai_related = any(keyword in content for keyword in ai_keywords)
-                        if not is_ai_related:
-                            continue
-                    
-                    # 提取摘要（如果有）
-                    summary = ''
-                    excerpt_elem = item.find(class_=re.compile(r'excerpt|summary|description'))
-                    if excerpt_elem:
-                        summary = excerpt_elem.get_text().strip()
-                    elif item.name == 'article':
-                        # 在article内查找段落
-                        p_elem = item.find('p')
-                        if p_elem:
-                            summary = p_elem.get_text().strip()
-                    
-                    # 估算发布时间（使用当前时间，因为HTML页面通常不直接显示具体时间）
-                    pub_time = datetime.now()
-                    
-                    article = {
-                        'id': link_hash[:8],
-                        'title': title[:150],
-                        'link': link,
-                        'source': source['name'],
-                        'summary': summary[:250] + '...' if len(summary) > 250 else summary,
-                        'category': source.get('category', 'general'),
-                        'lang': source.get('lang', 'en'),
-                        'importance': 6,
-                        'time': pub_time.strftime('%Y-%m-%d %H:%M'),
-                        'type': article_type
-                    }
-                    
-                    # 翻译英文内容
-                    if article['lang'] == 'en':
-                        translated = self.baidu_translate(title, summary)
-                        article['title_translated'] = translated['title']
-                        article['summary_translated'] = translated['summary']
-                    
-                    # 添加到相应列表
-                    self.all_articles.append(article)
-                    if article_type == 'ai':
-                        self.ai_articles.append(article)
-                    else:
-                        self.fact_articles.append(article)
-                    articles_added += 1
-                    
-                    print(f"    ✓ 解析文章: {title[:60]}...")
-                
-                if articles_added > 0:
-                    print(f"  ✓ {source['name']} HTML解析完成 ({articles_added}篇)")
-                else:
-                    print(f"  ⚠️  {source['name']} 未找到符合条件的文章")
-                
-                return articles_added
-                
-            except requests.exceptions.Timeout:
-                print(f"  ⚠️  {source['name']} 请求超时")
-                if attempt < max_retries - 1:
-                    print(f"     等待 3 秒后重试...")
-                    time.sleep(3)
-                    continue
-                return 0
-            except requests.exceptions.ConnectionError as e:
-                print(f"  ⚠️  {source['name']} 连接错误: {str(e)[:80]}")
-                if attempt < max_retries - 1:
-                    print(f"     等待 3 秒后重试...")
-                    time.sleep(3)
-                    continue
-                return 0
-            except Exception as e:
-                print(f"  ❌ {source['name']} HTML解析出错: {type(e).__name__}: {e}")
-                return 0
-        
-        return 0
+        """HTML页面解析方法（委托给 news_fetcher 模块）"""
+        articles = self.news_fetcher.fetch_html(source, article_type)
+        self.all_articles.extend(articles)
+        if article_type == 'ai':
+            self.ai_articles.extend(articles)
+        else:
+            self.fact_articles.extend(articles)
+        return len(articles)
     
     def fetch_all_news(self):
         """抓取所有新闻"""
@@ -1021,12 +329,10 @@ class EnhancedNewsAnalyzer:
         for source in self.ai_news_sources:
             print(f"  → {source['name']}")
             try:
-                if source['type'] == 'arxiv':
-                    self.fetch_arxiv(source)
-                elif source['type'] == 'rss':
-                    self.fetch_rss(source, article_type='ai')
-                elif source['type'] == 'hn_api':
-                    self.fetch_hackernews(source, article_type='ai')
+                # 使用新闻抓取模块
+                articles = self.news_fetcher.fetch_from_source(source, article_type='ai')
+                self.all_articles.extend(articles)
+                self.ai_articles.extend(articles)
                 time.sleep(1)
             except Exception as e:
                 print(f"    ❌ 抓取失败: {e}")
@@ -1036,34 +342,8 @@ class EnhancedNewsAnalyzer:
 
 
     def fetch_arxiv_abstract(self, url):
-        """从 arXiv 论文详情页提取完整摘要（带缓存机制）"""
-        # 检查缓存，避免重复请求
-        if url in self.abstract_cache:
-            print(f"  ✓ 使用缓存的摘要: {url}")
-            return self.abstract_cache[url]
-        
-        try:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-            response = requests.get(url, headers=headers, timeout=10)
-            response.raise_for_status()  # 非 200 抛异常
-            
-            soup = BeautifulSoup(response.text, 'html.parser')
-            abstract_tag = soup.find('blockquote', class_='abstract')
-            if abstract_tag:
-                abstract_text = abstract_tag.text.strip()
-                # 存入缓存
-                self.abstract_cache[url] = abstract_text
-                return abstract_text
-            else:
-                print(f"  ⚠️  未找到摘要标签: {url}")
-                self.abstract_cache[url] = ""
-                return ""
-        except Exception as e:
-            print(f"  ❌ 抓取 arXiv 摘要失败 {url}: {e}")
-            self.abstract_cache[url] = ""
-            return ""
+        """从 arXiv 论文详情页提取完整摘要（使用 news_fetcher 模块）"""
+        return self.news_fetcher.fetch_arxiv_abstract(url)
 
     def analyze_with_gemini(self, article):
         api_key = os.getenv('GEMINI_API_KEY')
